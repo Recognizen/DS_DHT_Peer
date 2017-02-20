@@ -28,7 +28,7 @@ public class NodeApp {
         public void preStart() {
             if (remotePath != null) {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
-                getContext().actorSelection(remotePath).tell(new GetKey(1), getSelf());
+               // getContext().actorSelection(remotePath).tell(new GetKey(1), getSelf());
             }
             nodes.put(myId, getSelf());
             dataItems.put(myId, new Item(myId,"test"+myId ,1));
@@ -49,6 +49,24 @@ public class NodeApp {
                     int id = ((Join)message).id;
                     System.out.println("Node " + id + " joined");
                     nodes.put(id, getSender());
+            }  
+
+            //When receiving a GetKey request message
+            else if (message instanceof Update){
+                //extract the keyId from the message
+                Integer itemKey = ((Update)message).keyId;
+                String itemValue = ((Update)message).value;
+                
+                //make a fresh item
+                Item newItem = new Item(itemKey, itemValue, 1);
+                //retrieve previous item if exists
+                Item current = dataItems.get(itemKey);                
+                if(current != null){
+                    //update the version
+                    newItem.setVersion(current.getVersion()+1);
+                }
+                //save or replace the dataItem
+                dataItems.put(itemKey, newItem);
             }
             
             //When receiving a GetKey request message
@@ -67,7 +85,15 @@ public class NodeApp {
             	unhandled(message);		// this actor does not handle any incoming messages
         }
     }
-	
+    
+    public static class Update implements Serializable{
+        final Integer keyId; 
+        final String value;
+        public Update(Integer keyId, String value){
+            this.keyId = keyId;
+            this.value = value;
+        }
+    } 
 
     public static class GetKey implements Serializable{
         final Integer keyId; 
@@ -129,5 +155,11 @@ public class NodeApp {
                         "node"						// actor name
                         );
         
+        if(args[0].equals("node3")){
+            System.out.println("Trying to send message");
+            system.actorSelection(remotePath).tell(new GetKey(1), receiver); 
+            system.actorSelection(remotePath).tell(new Update(1, "yoyo"), receiver);
+            system.actorSelection(remotePath).tell(new GetKey(1), receiver);
+        }
     }
 }
