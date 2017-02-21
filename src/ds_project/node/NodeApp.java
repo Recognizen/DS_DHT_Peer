@@ -22,13 +22,20 @@ import java.util.TreeSet;
 public class NodeApp {
     static private String remotePath = null; // Akka path of the bootstrapping peer
     static private int myId; // ID of the local node    
+    
+    //Replication Parameters
     static final private int N = 2;
-    	
+    static final private int R = 2;
+    static final private int W = 2;
+    
     public static class Node extends UntypedActor {
 		
         // The table of all nodes in the system id->ref
         private Map<Integer, ActorRef> nodes = new TreeMap<>();
         private Map<Integer, Item> dataItems = new HashMap<>();
+        
+        private ArrayList<Item> bufferedDataItems = null;
+        private ActorRef client = null;
         
         public void preStart() {
             if (remotePath != null) {
@@ -38,10 +45,10 @@ public class NodeApp {
             nodes.put(myId, getSelf());
             nodes.put(70, getSelf());
             nodes.put(60, getSelf());
-            dataItems.put(myId, new Item(61,"test"+myId ,1));
-            
+            dataItems.put(myId, new Item(61,"test"+myId ,1));     
         }
 
+        @SuppressWarnings("empty-statement")
         public void onReceive(Object message) {
             
             if (message instanceof RequestNodelist) {
@@ -58,6 +65,75 @@ public class NodeApp {
                     System.out.println("Node " + id + " joined");
                     nodes.put(id, getSender());
             }  
+            
+            //When receiving a GetKey request message
+            else if (message instanceof GetKey){
+                    
+                //extract the keyId from the message
+                Integer itemKey = ((GetKey)message).keyId;
+                
+                if("Coordintor".equals(getSelf())){
+                    
+                    //keep track of client to later respond
+                    client = getSender();
+                    
+                    //initialise bufferedDataItems, anticipating incoming dataItems from peers
+                    bufferedDataItems = new ArrayList<>();
+                    
+                    //Calculate interested Nodes and iterate over them
+                    for(Integer node : calculateNodes(itemKey)){
+                        //If I am interested
+                        if(node.equals(myId)){
+                            //retrieve the item locally and buffer it
+                            bufferedDataItems.add(dataItems.get(itemKey));
+                        }
+                        //If different node
+                        else{    
+                            //send same GetKey request but with coordinator as sender
+                            nodes.get(node).tell(message, getSelf());
+                        }
+                    }
+                    //<start timer somewhere here>
+                } 
+                //I am simply a peer, I just need to return my local copy
+                else{
+                    //respond to the sender with the local dataItem having that key
+                    DataItem item = new DataItem(dataItems.get(itemKey));
+                    getSender().tell(item, getSelf());
+                }
+            }
+            //When receiving a DataItem as response
+            else if(message instanceof DataItem){
+                //if not null then I previously initiated a read quorum request 
+                if(bufferedDataItems != null){
+                    //if not enough replies received
+                    if(bufferedDataItems.size() < R){
+                        //buffer the freshly received dataItem
+                        Item item = ((DataItem)message).item;
+                        bufferedDataItems.add(item);
+                    }
+                    //Read Quorum reached: I have received R items 
+                    else{
+                        //Find latest item based on version
+                        Item latestItem = null;
+                        for(Item i : bufferedDataItems){
+                            if(latestItem == null)
+                                latestItem = i;
+                            //Store the item with highest version
+                            else if(i.getVersion() > latestItem.getVersion())
+                                latestItem = i;
+                        }
+                        
+                        //Return latest item to the client
+                        if(client != null){
+                            client.tell(new DataItem(latestItem), getSelf());
+                            client = null;
+                            bufferedDataItems = null;
+                        }
+                    }
+                    //System.out.println(item.getKey() + " , "+item.getValue() + " , "+ item.getVersion());
+                }
+            }
 
             //When receiving a GetKey request message
             else if (message instanceof Update){
@@ -77,19 +153,6 @@ public class NodeApp {
                 dataItems.put(itemKey, newItem);
             }
             
-            //When receiving a GetKey request message
-            else if (message instanceof GetKey){
-                //extract the keyId from the message
-                Integer itemKey = ((GetKey)message).keyId;
-                calculateNodes(itemKey);
-                //respond to the sender with the local dataItem having that key
-                getSender().tell(new DataItem(dataItems.get(itemKey)), getSelf());
-            }
-            //When receiving a DataItem as response
-            else if(message instanceof DataItem){
-                Item item = ((DataItem)message).item;
-                System.out.println(item.getKey() + " , "+item.getValue() + " , "+ item.getVersion());
-            }
             else
             	unhandled(message);		// this actor does not handle any incoming messages
         }
@@ -107,7 +170,7 @@ public class NodeApp {
             Integer key;
             
             //find the N clockwise nodes
-            while(it.hasNext()){
+            while(interestedNodes.size() < N && it.hasNext()){
                 key = (Integer) it.next();
                 if(key != null && key >= itemKey){
                     interestedNodes.add(key);
@@ -116,7 +179,7 @@ public class NodeApp {
             }
             
             it = keys.iterator();
-            while(interestedNodes.size()<N && it.hasNext()){
+            while(interestedNodes.size() < N && it.hasNext()){
                 key = (Integer) it.next();
                 interestedNodes.add(key);
             }
