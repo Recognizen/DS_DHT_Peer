@@ -1,6 +1,6 @@
+package ds_project.node;
+
 import java.io.Serializable;
-import java.util.concurrent.TimeUnit;
-import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
@@ -9,34 +9,37 @@ import akka.actor.ActorRef;
 import akka.actor.UntypedActor;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
-import akka.actor.Cancellable;
-import scala.concurrent.duration.Duration;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
-import ds_project.node.Item;
+import ds_project.node.Messages.DataItem;
+import ds_project.node.Messages.GetKey;
+import ds_project.node.Messages.Update;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 
 public class NodeApp {
     static private String remotePath = null; // Akka path of the bootstrapping peer
     static private int myId; // ID of the local node    
     
     //Replication Parameters
-    static final private int N = 2;
-    static final private int R = 2;
-    static final private int W = 2;
+    static final private int N = 1;
+    static final private int R = 1;
+    static final private int W = 1;
     
     public static class Node extends UntypedActor {
 		
         // The table of all nodes in the system id->ref
-        private Map<Integer, ActorRef> nodes = new TreeMap<>();
-        private Map<Integer, Item> dataItems = new HashMap<>();
+        private final Map<Integer, ActorRef> nodes = new TreeMap<>();
+        private final Map<Integer, Item> dataItems = new HashMap<>();
         
         private ArrayList<Item> bufferedDataItems = null;
         private ActorRef client = null;
         
+        private boolean writeQuorum = false;
+        private Item latestItem = null;
+        
+        @Override
         public void preStart() {
             if (remotePath != null) {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
@@ -48,7 +51,7 @@ public class NodeApp {
             dataItems.put(myId, new Item(61,"test"+myId ,1));     
         }
 
-        @SuppressWarnings("empty-statement")
+        @Override
         public void onReceive(Object message) {
             
             if (message instanceof RequestNodelist) {
@@ -57,7 +60,7 @@ public class NodeApp {
             else if (message instanceof Nodelist) {
                 nodes.putAll(((Nodelist)message).nodes);
                 for (ActorRef n: nodes.values()) {
-                        n.tell(new Join(myId), getSelf());
+                    n.tell(new Join(myId), getSelf());
                 }
             }
             else if (message instanceof Join) {
@@ -65,23 +68,20 @@ public class NodeApp {
                     System.out.println("Node " + id + " joined");
                     nodes.put(id, getSender());
             }  
-            
             //When receiving a GetKey request message
             else if (message instanceof GetKey){
-                    
                 //extract the keyId from the message
                 Integer itemKey = ((GetKey)message).keyId;
                 
-                if("Coordintor".equals(getSelf())){
-                    
+                //TODO: Check to see if I am coordinator (node1 for testing)
+                if(getSelf().path().name().equals("node1")){
                     //keep track of client to later respond
-                    client = getSender();
-                    
+                    client = getSender();        
                     //initialise bufferedDataItems, anticipating incoming dataItems from peers
                     bufferedDataItems = new ArrayList<>();
                     
                     //Calculate interested Nodes and iterate over them
-                    for(Integer node : calculateNodes(itemKey)){
+                    for(Integer node : calculateInterestedNodes(itemKey)){
                         //If I am interested
                         if(node.equals(myId)){
                             //retrieve the item locally and buffer it
@@ -97,68 +97,139 @@ public class NodeApp {
                 } 
                 //I am simply a peer, I just need to return my local copy
                 else{
-                    //respond to the sender with the local dataItem having that key
-                    DataItem item = new DataItem(dataItems.get(itemKey));
+                    //respond to the sender with the local dataItem having that key or a "not present" dataItem
+                    DataItem item = new DataItem(new Item(itemKey, "", 0));
+                    if(dataItems.containsKey(itemKey))
+                        item = new DataItem(dataItems.get(itemKey));
                     getSender().tell(item, getSelf());
                 }
             }
-            //When receiving a DataItem as response
-            else if(message instanceof DataItem){
-                //if not null then I previously initiated a read quorum request 
-                if(bufferedDataItems != null){
-                    //if not enough replies received
-                    if(bufferedDataItems.size() < R){
-                        //buffer the freshly received dataItem
-                        Item item = ((DataItem)message).item;
-                        bufferedDataItems.add(item);
-                    }
-                    //Read Quorum reached: I have received R items 
-                    else{
-                        //Find latest item based on version
-                        Item latestItem = null;
-                        for(Item i : bufferedDataItems){
-                            if(latestItem == null)
-                                latestItem = i;
-                            //Store the item with highest version
-                            else if(i.getVersion() > latestItem.getVersion())
-                                latestItem = i;
-                        }
-                        
-                        //Return latest item to the client
-                        if(client != null){
-                            client.tell(new DataItem(latestItem), getSelf());
-                            client = null;
-                            bufferedDataItems = null;
-                        }
-                    }
-                    //System.out.println(item.getKey() + " , "+item.getValue() + " , "+ item.getVersion());
-                }
-            }
-
-            //When receiving a GetKey request message
+            
+            //When receiving an Update request message
             else if (message instanceof Update){
                 //extract the keyId from the message
                 Integer itemKey = ((Update)message).keyId;
                 String itemValue = ((Update)message).value;
+                int itemVersion = ((Update)message).version;
                 
-                //make a fresh item
-                Item newItem = new Item(itemKey, itemValue, 1);
-                //retrieve previous item if exists
-                Item current = dataItems.get(itemKey);                
-                if(current != null){
-                    //update the version
-                    newItem.setVersion(current.getVersion()+1);
+                 //TODO: Check to see if I am coordinator (node1 for testing)
+                if(getSelf().path().name().equals("node1")){
+                    
+                    //keep track of client to later respond
+                    client = getSender();
+                    
+                    //initialise bufferedDataItems, anticipating incoming dataItems from peers
+                    bufferedDataItems = new ArrayList<>();
+                    
+                    //I am trying to establish an Update Quorum
+                    writeQuorum = true;
+                    //as far as I know the dataItem I received is the latest
+                    latestItem = new Item(itemKey, itemValue, itemVersion);
+                    
+                    //Calculate interested Nodes and iterate over them
+                    for(Integer node : calculateInterestedNodes(itemKey)){
+                        //If I am interested
+                        if(node.equals(myId)){
+                            //retrieve the item locally and buffer it
+                            bufferedDataItems.add(dataItems.get(itemKey));
+                        }
+                        //If different node
+                        else{    
+                            //send same GetKey request but with coordinator as sender
+                            nodes.get(node).tell(message, getSelf());
+                        }
+                    }
+                    //<start timer somewhere here>
+                } 
+                //I am peer so I should just write
+                else{
+                    //simply write the dataItem I received
+                    Item newItem = new Item(itemKey, itemValue, itemVersion);
+                    //save or replace the dataItem
+                    dataItems.put(itemKey, newItem);
                 }
-                //save or replace the dataItem
-                dataItems.put(itemKey, newItem);
             }
-            
+             //When receiving a DataItem as response
+            else if(message instanceof DataItem){
+                //if not null then I previously initiated a read quorum request 
+                if(bufferedDataItems != null){
+                    /**if not enough replies received 
+                    * two cases: 
+                    *    ReadQuorum - if not enough replies yet and not a writeQuorum expected
+                    *    WriteQuorum - if not enough replies yet and writeQuorum expected
+                    */
+                    if( (bufferedDataItems.size() < R && !writeQuorum) || 
+                            (bufferedDataItems.size() < Integer.max(R,W) && writeQuorum)){
+                        //buffer the freshly received dataItem
+                        Item item = ((DataItem)message).item;
+                        bufferedDataItems.add(item);
+                    }
+                    //Read/Write Quorum reached: I have received enough replies 
+                    else if((bufferedDataItems.size() == R && !writeQuorum) || 
+                            (bufferedDataItems.size() == Integer.max(R,W) && writeQuorum)) {
+                        
+                        //<stop timeout timer>
+                        
+                        //Find latest item based on version
+                        for(Item i : bufferedDataItems){
+                            //replace latestItem with the item having highest version
+                            if(i.getVersion() > latestItem.getVersion())
+                                latestItem = i;
+                        }
+                        
+                        //If client ActorRef exists
+                        if(client != null){
+                            //if I am trying to establish a writeQuorum
+                            if(writeQuorum){
+                                //TODO: Answer client - successful write
+                                client.tell(new DataItem(latestItem), getSelf());
+                                //Increment item version before writing
+                                latestItem.setVersion(latestItem.getVersion()+1);
+                                //for every interestedNode
+                                for(Integer node : calculateInterestedNodes(latestItem.getKey())){
+                                    //If I am interested
+                                    if(node.equals(myId)){
+                                        //perform local update
+                                        dataItems.put(latestItem.getKey(), latestItem);
+                                    }
+                                    //If different node
+                                    else{    
+                                        //send Update request to other interestedNodes with latest dataItem
+                                        nodes.get(node).tell(
+                                                new Update(latestItem.getKey(),
+                                                           latestItem.getValue(),
+                                                           latestItem.getVersion())
+                                                , getSelf());
+                                    }
+                                }
+                            }
+                            //readQuorum = !writeQuorum
+                            else{
+                                client.tell(new DataItem(latestItem), getSelf());
+                            }
+                        }
+                        //quorum reached - reset values
+                        client = null;
+                        bufferedDataItems = null;
+                        writeQuorum = false;
+                        latestItem = null;
+                    }
+                    else
+                        unhandled(message);
+                }
+                else{
+                    //no quorum initiated because bufferedDataItems == null
+                    unhandled(message);
+                    System.out.println("Not expecting any messages... No quorum initated");
+                }    
+            }
+            //Do not handle messages you don't know
             else
-            	unhandled(message);		// this actor does not handle any incoming messages
+            	unhandled(message);
         }
         
         //check on number of nodes should be done earlier
-        public ArrayList<Integer> calculateNodes(Integer itemKey){
+        public ArrayList<Integer> calculateInterestedNodes(Integer itemKey){
             //N replication parameter
             ArrayList<Integer> interestedNodes = new ArrayList<>();
             Set<Integer> keys = nodes.keySet();
@@ -206,28 +277,15 @@ public class NodeApp {
             return interestedNodes;
         }
        
-    }
+    }    
     
-    public static class Update implements Serializable{
-        final Integer keyId; 
-        final String value;
-        public Update(Integer keyId, String value){
-            this.keyId = keyId;
-            this.value = value;
-        }
-    } 
-
-    public static class GetKey implements Serializable{
-        final Integer keyId; 
-        public GetKey(Integer keyId){
-            this.keyId = keyId;
-        }
-    } 
+    // ****** Messages needed to establish DHT network *****
+    public static class RequestNodelist implements Serializable {}
     
-    public static class DataItem implements Serializable{
-        final Item item; 
-        public DataItem(Item item){
-            this.item = item;
+    public static class Nodelist implements Serializable {
+        Map<Integer, ActorRef> nodes;
+        public Nodelist(Map<Integer, ActorRef> nodes) {
+            this.nodes = Collections.unmodifiableMap(new HashMap<>(nodes)); 
         }
     }
     
@@ -235,15 +293,6 @@ public class NodeApp {
         final int id;
         public Join(int id) {
             this.id = id;
-        }
-    }
-    
-    public static class RequestNodelist implements Serializable {}
-    
-    public static class Nodelist implements Serializable {
-        Map<Integer, ActorRef> nodes;
-        public Nodelist(Map<Integer, ActorRef> nodes) {
-            this.nodes = Collections.unmodifiableMap(new HashMap<Integer, ActorRef>(nodes)); 
         }
     }
 
@@ -274,7 +323,7 @@ public class NodeApp {
         // Create a single node actor
         final ActorRef receiver = system.actorOf(
                         Props.create(Node.class),	// actor class 
-                        "node"						// actor name
+                        args[0]						// actor name
                         );
         
         if(args[0].equals("node3")){
