@@ -14,9 +14,12 @@ import com.typesafe.config.Config;
 import ds_project.node.Messages.DataItem;
 import ds_project.node.Messages.GetKey;
 import ds_project.node.Messages.Update;
+import static java.lang.Thread.sleep;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class NodeApp {
     static private String remotePath = null; // Akka path of the bootstrapping peer
@@ -43,12 +46,11 @@ public class NodeApp {
         public void preStart() {
             if (remotePath != null) {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
-               // getContext().actorSelection(remotePath).tell(new GetKey(1), getSelf());
             }
             nodes.put(myId, getSelf());
             nodes.put(70, getSelf());
-            nodes.put(60, getSelf());
-            dataItems.put(myId, new Item(61,"test"+myId ,1));     
+            nodes.put(22, getSelf());
+            dataItems.put(myId, new Item(myId,"test"+myId ,1));     
         }
 
         @Override
@@ -86,6 +88,7 @@ public class NodeApp {
                         if(node.equals(myId)){
                             //retrieve the item locally and buffer it
                             bufferedDataItems.add(dataItems.get(itemKey));
+                            getSelf().tell(new DataItem(dataItems.get(itemKey)), getSelf());
                         }
                         //If different node
                         else{    
@@ -172,13 +175,16 @@ public class NodeApp {
                         
                         //Find latest item based on version
                         for(Item i : bufferedDataItems){
+                            if(latestItem == null)
+                                latestItem = i;
                             //replace latestItem with the item having highest version
-                            if(i.getVersion() > latestItem.getVersion())
+                            else if(i.getVersion() > latestItem.getVersion())
                                 latestItem = i;
                         }
                         
                         //If client ActorRef exists
                         if(client != null){
+                            System.out.print(client.path().toString());
                             //if I am trying to establish a writeQuorum
                             if(writeQuorum){
                                 //TODO: Answer client - successful write
@@ -215,12 +221,16 @@ public class NodeApp {
                         latestItem = null;
                     }
                     else
+                        //messages after quorum reached are not needed
                         unhandled(message);
                 }
                 else{
+                    System.out.println(((DataItem)message).item.getKey() + " "+ 
+                            ((DataItem)message).item.getValue() +" " +
+                            ((DataItem)message).item.getVersion());
                     //no quorum initiated because bufferedDataItems == null
-                    unhandled(message);
-                    System.out.println("Not expecting any messages... No quorum initated");
+                    //unhandled(message);
+                    //System.out.println("Not expecting any messages... No quorum initated");
                 }    
             }
             //Do not handle messages you don't know
@@ -311,7 +321,7 @@ public class NodeApp {
             String ip = args[1];
             String port = args[2];
             // The Akka path to the bootstrapping peer
-            remotePath = "akka.tcp://mysystem@"+ip+":"+port+"/user/node";
+            remotePath = "akka.tcp://mysystem@"+ip+":"+port+"/user/node1";
             System.out.println("Starting node " + myId + "; bootstrapping node: " + ip + ":"+ port);
         }
         else 
@@ -328,9 +338,10 @@ public class NodeApp {
         
         if(args[0].equals("node3")){
             System.out.println("Trying to send message");
-            system.actorSelection(remotePath).tell(new GetKey(61), receiver); 
-            system.actorSelection(remotePath).tell(new Update(61, "yoyo"), receiver);
-            system.actorSelection(remotePath).tell(new GetKey(61), receiver);
+  
+            system.actorSelection(remotePath).tell(new GetKey(1), receiver); 
+            system.actorSelection(remotePath).tell(new Update(1, "yoyo"), receiver);
+            system.actorSelection(remotePath).tell(new GetKey(1), receiver);
         }
     }
 }
