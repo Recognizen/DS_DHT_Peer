@@ -26,9 +26,9 @@ public class NodeApp {
     static private int myId; // ID of the local node    
     
     //Replication Parameters
-    static final private int N = 1;
-    static final private int R = 1;
-    static final private int W = 1;
+    static final private int N = 2;
+    static final private int R = 2;
+    static final private int W = 2;
     
     public static class Node extends UntypedActor {
 		
@@ -48,9 +48,8 @@ public class NodeApp {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
             }
             nodes.put(myId, getSelf());
-            nodes.put(70, getSelf());
-            nodes.put(22, getSelf());
-            dataItems.put(myId, new Item(myId,"test"+myId ,1));     
+            dataItems.put(1, new Item(1,"test"+1 ,1));   
+            dataItems.put(2, new Item(2,"test"+2 ,1));    
         }
 
         @Override
@@ -77,6 +76,8 @@ public class NodeApp {
                 
                 //TODO: Check to see if I am coordinator (node1 for testing)
                 if(getSelf().path().name().equals("node1")){
+                    
+                    System.out.println("[GET] I AM COORDINATOR NODE "+ getSelf().path().name() );
                     //keep track of client to later respond
                     client = getSender();        
                     //initialise bufferedDataItems, anticipating incoming dataItems from peers
@@ -100,10 +101,13 @@ public class NodeApp {
                 } 
                 //I am simply a peer, I just need to return my local copy
                 else{
+                    
+                    System.out.println("[GET] I AM PEER NODE "+ getSelf().path().name() );
                     //respond to the sender with the local dataItem having that key or a "not present" dataItem
                     DataItem item = new DataItem(new Item(itemKey, "", 0));
                     if(dataItems.containsKey(itemKey))
                         item = new DataItem(dataItems.get(itemKey));
+                    System.out.println("From: "+getSender().path().name());
                     getSender().tell(item, getSelf());
                 }
             }
@@ -117,6 +121,8 @@ public class NodeApp {
                 
                  //TODO: Check to see if I am coordinator (node1 for testing)
                 if(getSelf().path().name().equals("node1")){
+                    
+                    System.out.println("[Update] I AM COORDINATOR NODE "+ getSelf().path().name() );
                     
                     //keep track of client to later respond
                     client = getSender();
@@ -139,13 +145,14 @@ public class NodeApp {
                         //If different node
                         else{    
                             //send same GetKey request but with coordinator as sender
-                            nodes.get(node).tell(message, getSelf());
+                            nodes.get(node).tell(new GetKey(itemKey), getSelf());
                         }
                     }
                     //<start timer somewhere here>
                 } 
                 //I am peer so I should just write
                 else{
+                    System.out.println("[Update] I AM PEER NODE "+ getSelf().path().name() );
                     //simply write the dataItem I received
                     Item newItem = new Item(itemKey, itemValue, itemVersion);
                     //save or replace the dataItem
@@ -167,8 +174,9 @@ public class NodeApp {
                         Item item = ((DataItem)message).item;
                         bufferedDataItems.add(item);
                     }
+                    
                     //Read/Write Quorum reached: I have received enough replies 
-                    else if((bufferedDataItems.size() == R && !writeQuorum) || 
+                    if((bufferedDataItems.size() == R && !writeQuorum) || 
                             (bufferedDataItems.size() == Integer.max(R,W) && writeQuorum)) {
                         
                         //<stop timeout timer>
@@ -178,19 +186,23 @@ public class NodeApp {
                             if(latestItem == null)
                                 latestItem = i;
                             //replace latestItem with the item having highest version
-                            else if(i.getVersion() > latestItem.getVersion())
+                            if(i.getVersion() > latestItem.getVersion())
                                 latestItem = i;
                         }
                         
                         //If client ActorRef exists
                         if(client != null){
-                            System.out.print(client.path().toString());
+                            System.out.println("Requester is: "+client.path().name());
                             //if I am trying to establish a writeQuorum
                             if(writeQuorum){
-                                //TODO: Answer client - successful write
-                                client.tell(new DataItem(latestItem), getSelf());
                                 //Increment item version before writing
                                 latestItem.setVersion(latestItem.getVersion()+1);
+                                
+                                
+                                System.out.println("Responding to: "+client.path().name() + " with " + latestItem.getKey() + " " + latestItem.getVersion());
+                                //TODO: Answer client - successful write
+                                client.tell(new DataItem(latestItem), getSelf());
+                                
                                 //for every interestedNode
                                 for(Integer node : calculateInterestedNodes(latestItem.getKey())){
                                     //If I am interested
@@ -337,11 +349,29 @@ public class NodeApp {
                         );
         
         if(args[0].equals("node3")){
-            System.out.println("Trying to send message");
-  
-            system.actorSelection(remotePath).tell(new GetKey(1), receiver); 
-            system.actorSelection(remotePath).tell(new Update(1, "yoyo"), receiver);
-            system.actorSelection(remotePath).tell(new GetKey(1), receiver);
+            
+            try {
+                sleep(5000);
+            } catch (InterruptedException ex) {
+                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            
+            System.out.println("-------------> Trying to send message");
+            system.actorSelection(remotePath).tell(new GetKey(2), receiver); 
+             try {
+                sleep(5000);
+            } catch (InterruptedException ex) {
+                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            system.actorSelection(remotePath).tell(new Update(2, "truffles"), receiver);
+             try {
+                sleep(5000);
+            } catch (InterruptedException ex) {
+                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            system.actorSelection(remotePath).tell(new GetKey(2), receiver);
+            
+            //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
         }
     }
 }
