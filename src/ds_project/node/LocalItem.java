@@ -11,13 +11,13 @@ import java.io.Serializable;
  *
  * @author recognition
  */
-public class Item implements Serializable{
+public class LocalItem implements Serializable{
     
     private Integer key;
     private String value;
     private int version;
     
-    public Item(Integer key, String value, int version){
+    public LocalItem(Integer key, String value, int version){
         this.key = key;
         this.value = value;
         this.version = version;
