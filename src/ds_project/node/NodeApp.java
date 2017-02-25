@@ -234,22 +234,41 @@ public class NodeApp {
                     //as far as I know the dataItem I received is the latest
                     latestItem = new Item(itemKey, itemValue, itemVersion);
                     
-                    //Calculate interested Nodes and iterate over them
-                    for(Integer node : calculateInterestedNodes(itemKey)){
-                        //If I am interested
-                        if(node.equals(myId)){
-                            //retrieve the item locally and buffer it
-                            bufferedDataItems.add(dataItems.get(itemKey));
-                        }
-                        //If different node
-                        else{    
-                            //send same GetKey request but with coordinator as sender
-                            nodes.get(node).tell(new GetKey(itemKey), getSelf());
-                        }
+                    Item item = new Item(itemKey, "", 0);
+                    //Retrieve Nodes of interest
+                    ArrayList<Integer> interestedNodes = calculateInterestedNodes(itemKey);
+                    
+                    //If R = W = 1 and I am part of the interested nodes then no need to pass through the network
+                    if(interestedNodes.contains(myId) && R == 1 && W == 1){
+                        if(dataItems.containsKey(itemKey))
+                            item = dataItems.get(itemKey);
+                        latestItem.setVersion(item.getVersion()+1);
+                        //simply reply to client
+                        client.tell(new DataItem(latestItem), getSelf());
+                        dataItems.put(itemKey, latestItem);
+                        //and cleanup variables state
+                        cleanup();
                     }
-                    //<start timer somewhere here>
-                    setTimoutTask();
-                    timer.schedule(timerTask,T);
+                    else{
+                        for(Integer node : interestedNodes){
+                            //If I am interested
+                            if(node.equals(myId)){
+                                if(dataItems.containsKey(itemKey))
+                                    item = dataItems.get(itemKey);
+                                //retrieve the item locally and buffer it
+                                bufferedDataItems.add(item);
+                            }
+                            //If different node
+                            else{    
+                                //send same GetKey request but with coordinator as sender
+                                (nodes.get(node)).tell(new GetKey(itemKey), getSelf());
+                            }
+                        }
+
+                        //<start timer somewhere here>
+                        setTimoutTask();
+                        timer.schedule(timerTask,T);
+                    }
                 } 
                 //I am peer so I should just write
                 else{
