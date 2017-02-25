@@ -5,7 +5,11 @@
  */
 package ds_project.node;
 
+import akka.actor.ActorRef;
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  *
@@ -40,6 +44,23 @@ public class Messages {
         public final Item item; 
         public DataItem(Item item){
             this.item = item;
+        }
+    }
+    
+        // ****** Messages needed to establish DHT network *****
+    public static class RequestNodelist implements Serializable {}
+    
+    public static class Nodelist implements Serializable {
+        Map<Integer, ActorRef> nodes;
+        public Nodelist(Map<Integer, ActorRef> nodes) {
+            this.nodes = Collections.unmodifiableMap(new HashMap<>(nodes)); 
+        }
+    }
+    
+    public static class Join implements Serializable {
+        final int id;
+        public Join(int id) {
+            this.id = id;
         }
     }
     
