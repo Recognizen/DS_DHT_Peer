@@ -25,9 +25,9 @@ public class NodeApp {
     static private int myId; // ID of the local node    
 
     //Replication Parameters
-    static final private int N = 2;
-    static final private int R = 2;
-    static final private int W = 2;
+    static final private int N = 1;
+    static final private int R = 1;
+    static final private int W = 1;
 
     //Timeout Interval in ms
     static final private int T = 2000;
@@ -80,7 +80,7 @@ public class NodeApp {
                 Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
             }
             //system.actorSelection(remotePath).tell(new Update(2, "truffles"), receiver);
-            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
+           // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
 
             try {
                 sleep(5000);
@@ -88,7 +88,7 @@ public class NodeApp {
                 Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
             }
             //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
-            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
+           // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
 
             //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
         }
@@ -127,8 +127,11 @@ public class NodeApp {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
             }
             nodes.put(myId, getSelf());
-            //dataItems.put(1, new Item(1,"test"+1 ,2));   
-            //dataItems.put(2, new Item(2,"test"+2 ,2));    
+           /* localItems.put(1, new LocalItem(1,"test"+1 ,1));   
+            localItems.put(2, new LocalItem(2,"test"+2 ,1)); 
+            //localItems.put(3, new LocalItem(3,"test"+3 ,1));
+            localItems.put(100, new LocalItem(100,"test"+100 ,1)); 
+           // localItems.put(50, new LocalItem(50,"test"+50 ,1));/**/
         }
 
         @Override
@@ -136,15 +139,78 @@ public class NodeApp {
 
             if (message instanceof RequestNodelist) {
                 getSender().tell(new Nodelist(nodes), getSelf());
-            } else if (message instanceof Nodelist) {
+            } 
+            else if (message instanceof Nodelist) {
                 nodes.putAll(((Nodelist) message).nodes);
-                for (ActorRef n : nodes.values()) {
-                    n.tell(new Join(myId), getSelf());
+                
+                for (Integer node : nClockwiseNodes(myId+1, 1)) {
+                    (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
                 }
-            } else if (message instanceof Join) {
+            } 
+            //Return the nodes the requester is responsible for
+            if (message instanceof RequestItemlist) {
+                final int id = ((RequestItemlist)message).id;
+                final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
+                
+                for(Integer key : localItems.keySet()){
+                    if( (myId > id && key < myId) 
+                            || key == id
+                          //  || (myId < id && key <= id && key > id) 
+                            || (nodes.size() < N)){
+                        LocalItem item = localItems.get(key);
+                        repartitionItems.put(key, new ImmutableItem(item.getKey(),
+                                                                    item.getValue(),
+                                                                    item.getVersion()));
+                    }
+                    else{
+                        //System.out.println("Calculating responsible nodes for key :" +key);
+                        nodes.put(id, null);
+                        ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
+                        nodes.remove(id);
+                        if(responsibleNodes.contains(id)){
+                            LocalItem item = localItems.get(key);
+                            repartitionItems.put(key, new ImmutableItem(item.getKey(),
+                                                                    item.getValue(),
+                                                                    item.getVersion()));
+                         }
+                    }
+                }
+                getSender().tell(new ItemList(repartitionItems), getSelf());
+            } 
+            //Receiving items I am responsible for
+            else if (message instanceof ItemList){
+                final Map<Integer, ImmutableItem> receivedItems = ((ItemList)message).items;
+                //Add them to my localItems
+                for(Integer key : receivedItems.keySet()){
+                    ImmutableItem item = receivedItems.get(key);
+                    localItems.put(key, new LocalItem(item.getKey(),
+                                                      item.getValue(),
+                                                      item.getVersion()));
+                }
+                //Then persist
+                System.out.println("Received "+ receivedItems.keySet());
+                //Announce my joining                
+                for (ActorRef n : nodes.values()) {
+                        n.tell(new Join(myId), getSelf());
+                }
+            }
+            else if (message instanceof Join) {
                 int id = ((Join) message).id;
                 System.out.println("Node " + id + " joined");
                 nodes.put(id, getSender());
+                
+                if(myId != id && !localItems.isEmpty()){
+                    Iterator it = localItems.keySet().iterator();
+                    while(it.hasNext()){
+                        Integer key = (Integer) it.next();
+                        ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
+                        if(!responsibleNodes.contains(myId))
+                            it.remove();
+                    }
+                }                   
+                //Printout
+                System.out.println("After "+id+" has joined ");
+                System.out.println("["+getSelf().path().name()+"] : "+localItems.keySet());
             } 
             //When receiving a GetKey request message
             else if (message instanceof GetKey) {
@@ -161,7 +227,7 @@ public class NodeApp {
                     bufferedItems = new ArrayList<>();
 
                     //Retrieve Nodes of interest
-                    ArrayList<Integer> interestedNodes = calculateInterestedNodes(itemKey);
+                    ArrayList<Integer> interestedNodes = nClockwiseNodes(itemKey, N);
 
                     //If R = 1 and I am part of the interested nodes then no need to pass through the network
                     if (interestedNodes.contains(myId) && R == 1) {
@@ -244,7 +310,7 @@ public class NodeApp {
 
                     LocalItem item = new LocalItem(itemKey, "", 0);
                     //Retrieve Nodes of interest
-                    ArrayList<Integer> interestedNodes = calculateInterestedNodes(itemKey);
+                    ArrayList<Integer> interestedNodes = nClockwiseNodes(itemKey, N);
 
                     //If R = W = 1 and I am part of the interested nodes then no need to pass through the network
                     if (interestedNodes.contains(myId) && R == 1 && W == 1) {
@@ -344,10 +410,10 @@ public class NodeApp {
                                                             latestItem.getKey(),
                                                             latestItem.getValue(),
                                                             latestItem.getVersion()))
-                                        , getSelf());
+                                            , getSelf());
 
                                 //for every interestedNode
-                                for (Integer node : calculateInterestedNodes(latestItem.getKey())) {
+                                for (Integer node : nClockwiseNodes(latestItem.getKey(), N)) {
                                     //If I am interested
                                     if (node.equals(myId)) {
                                         //perform local update
@@ -369,7 +435,7 @@ public class NodeApp {
                                                        latestItem.getKey(),
                                                        latestItem.getValue(),
                                                        latestItem.getVersion()))
-                                   , getSelf());
+                                            , getSelf());
                             }
                         }
                         //quorum reached - cleanup
@@ -399,18 +465,18 @@ public class NodeApp {
         }
 
         //check on number of nodes should be done earlier
-        public ArrayList<Integer> calculateInterestedNodes(Integer itemKey) {
+        public ArrayList<Integer> nClockwiseNodes(Integer itemKey, int n) {
             //N replication parameter
             ArrayList<Integer> interestedNodes = new ArrayList<>();
             Set<Integer> keys = nodes.keySet();
 
-            System.out.println("Printing key set " + keys.toString());
+            System.out.println("[ClockwiseNodes] Printing key set " + keys.toString());
 
             Iterator it = keys.iterator();
             Integer key;
 
             //find the N - k clockwise nodes (where k is the number of nodes with id < itemKey)
-            while (interestedNodes.size() < N && it.hasNext()) {
+            while (interestedNodes.size() < n && it.hasNext()) {
                 key = (Integer) it.next();
                 if (key != null && key >= itemKey) {
                     interestedNodes.add(key);
@@ -420,12 +486,12 @@ public class NodeApp {
 
             //for circularity: start over and get the k remaining nodes
             it = keys.iterator();
-            while (interestedNodes.size() < N && it.hasNext()) {
+            while (interestedNodes.size() < n && it.hasNext()) {
                 key = (Integer) it.next();
                 interestedNodes.add(key);
             }
 
-            System.out.println("Selected Nodes " + interestedNodes.toString());
+            System.out.println("[ClockwiseNodes] Selected Nodes " + interestedNodes.toString());
             return interestedNodes;
         }
 

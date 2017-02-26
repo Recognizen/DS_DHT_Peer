@@ -23,44 +23,26 @@ public class LocalItem implements Serializable{
         this.version = version;
     }
 
-    /**
-     * @return the key
-     */
     public Integer getKey() {
         return key;
     }
 
-    /**
-     * @param key the key to set
-     */
     public void setKey(Integer key) {
         this.key = key;
     }
 
-    /**
-     * @return the value
-     */
     public String getValue() {
         return value;
     }
 
-    /**
-     * @param value the value to set
-     */
     public void setValue(String value) {
         this.value = value;
     }
 
-    /**
-     * @return the version
-     */
     public int getVersion() {
         return version;
     }
 
-    /**
-     * @param version the version to set
-     */
     public void setVersion(int version) {
         this.version = version;
     }

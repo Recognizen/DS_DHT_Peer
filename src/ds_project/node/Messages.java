@@ -56,7 +56,8 @@ public class Messages {
 
     // ****** Messages needed to establish DHT network *****
     public static class RequestNodelist implements Serializable {
-    }
+    }    
+
 
     public static class Nodelist implements Serializable {
 
@@ -68,15 +69,31 @@ public class Messages {
     }
 
     public static class Join implements Serializable {
-
         final int id;
 
         public Join(int id) {
             this.id = id;
         }
     }
+    
+    public static class RequestItemlist implements Serializable {
+        final int id;
 
-    public final class ImmutableItem implements Serializable {
+        public RequestItemlist(int id) {
+            this.id = id;
+        }
+    }    
+    
+    public static class ItemList implements Serializable {
+
+        Map<Integer, ImmutableItem> items;
+
+        public ItemList(Map<Integer, ImmutableItem> items) {
+            this.items = Collections.unmodifiableMap(new HashMap<>(items));
+        }
+    }
+
+    public static final class ImmutableItem implements Serializable {
 
         private final int key;
         private final String value;
@@ -88,7 +105,7 @@ public class Messages {
             this.version = version;
         }
 
-        public Integer getKey() {
+        public int getKey() {
             return key;
         }
 
@@ -101,5 +118,4 @@ public class Messages {
         }
 
     }
-
 }
