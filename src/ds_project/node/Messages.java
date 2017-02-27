@@ -76,6 +76,9 @@ public class Messages {
         }
     }
     
+    public static class Leave implements Serializable {
+    }
+    
     public static class RequestItemlist implements Serializable {
         final int id;
 
@@ -86,10 +89,17 @@ public class Messages {
     
     public static class ItemList implements Serializable {
 
-        Map<Integer, ImmutableItem> items;
+        final Map<Integer, ImmutableItem> items;
+        final boolean leave;
 
         public ItemList(Map<Integer, ImmutableItem> items) {
             this.items = Collections.unmodifiableMap(new HashMap<>(items));
+            this.leave = false;
+        }
+        
+        public ItemList(Map<Integer, ImmutableItem> items, boolean leave) {
+            this.items = Collections.unmodifiableMap(new HashMap<>(items));
+            this.leave = leave;
         }
     }
 

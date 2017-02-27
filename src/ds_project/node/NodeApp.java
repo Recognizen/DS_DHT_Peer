@@ -7,6 +7,7 @@ import akka.actor.ActorRef;
 import akka.actor.UntypedActor;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
+import akka.actor.Terminated;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
 import ds_project.node.Messages.*;
@@ -25,12 +26,12 @@ public class NodeApp {
     static private int myId; // ID of the local node    
 
     //Replication Parameters
-    static final private int N = 1;
-    static final private int R = 1;
-    static final private int W = 1;
+    static final private int N = 2;
+    static final private int R = 2;
+    static final private int W = 2;
 
     //Timeout Interval in ms
-    static final private int T = 2000;
+    static final private int T = 3000;
 
     public static void main(String[] args) {
 
@@ -63,34 +64,60 @@ public class NodeApp {
         );
 
         if (args[0].equals("node3")) {
-
+            
             try {
                 sleep(1000);
             } catch (InterruptedException ex) {
                 Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
             }
 
+            
+            
             System.out.println("-------------> Trying to send message");
-            //system.actorSelection(remotePath).tell(new GetKey(2), receiver); 
+            system.actorSelection(remotePath).tell(new Update(1, "truffles"), receiver);
             //system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(1), receiver);
 
             try {
-                sleep(5000);
+                sleep(3000);
             } catch (InterruptedException ex) {
                 Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
             }
+            
+            system.actorSelection(remotePath).tell(new Update(61, "sixtyone"), receiver);
             //system.actorSelection(remotePath).tell(new Update(2, "truffles"), receiver);
            // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
 
             try {
-                sleep(5000);
+                sleep(3000);
             } catch (InterruptedException ex) {
                 Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
             }
+            
+            system.actorSelection(remotePath).tell(new Update(3, "jenny"), receiver);
+            try {
+                sleep(3000);
+            } catch (InterruptedException ex) {
+                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            
+            system.actorSelection(remotePath).tell(new GetKey(2), receiver); 
             //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
            // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
 
             //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
+        }
+        else if (args[0].equals("node4")){
+               try {
+                sleep(1000);
+            } catch (InterruptedException ex) {
+                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+            }
+
+            
+            
+            System.out.println("-------------> Trying to send leave message");
+            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10003/user/node90").tell(new Leave(), receiver);
+        
         }
     }
 
@@ -129,9 +156,9 @@ public class NodeApp {
             nodes.put(myId, getSelf());
            /* localItems.put(1, new LocalItem(1,"test"+1 ,1));   
             localItems.put(2, new LocalItem(2,"test"+2 ,1)); 
-            //localItems.put(3, new LocalItem(3,"test"+3 ,1));
+            localItems.put(3, new LocalItem(3,"test"+3 ,1));
             localItems.put(100, new LocalItem(100,"test"+100 ,1)); 
-           // localItems.put(50, new LocalItem(50,"test"+50 ,1));/**/
+            localItems.put(50, new LocalItem(50,"test"+50 ,1));*/
         }
 
         @Override
@@ -142,6 +169,7 @@ public class NodeApp {
             } 
             else if (message instanceof Nodelist) {
                 nodes.putAll(((Nodelist) message).nodes);
+                nodes.values().forEach(node -> this.context().watch(node));
                 
                 for (Integer node : nClockwiseNodes(myId+1, 1)) {
                     (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
@@ -189,15 +217,25 @@ public class NodeApp {
                 }
                 //Then persist
                 System.out.println("Received "+ receivedItems.keySet());
-                //Announce my joining                
-                for (ActorRef n : nodes.values()) {
-                        n.tell(new Join(myId), getSelf());
+                
+                if(!((ItemList)message).leave){
+                    //Announce my joining                
+                    for (ActorRef n : nodes.values()) {
+                            n.tell(new Join(myId), getSelf());
+                    }
+                }
+                else{
+                    System.out.println(getSender().path() + " is leaving ["+nodes.size());
+                    nodes.values().remove(getSender());
+                    System.out.println(getSender().path() + " is leaving ["+nodes.size());
                 }
             }
             else if (message instanceof Join) {
                 int id = ((Join) message).id;
                 System.out.println("Node " + id + " joined");
                 nodes.put(id, getSender());
+                
+                this.context().watch(getSender());
                 
                 if(myId != id && !localItems.isEmpty()){
                     Iterator it = localItems.keySet().iterator();
@@ -210,15 +248,32 @@ public class NodeApp {
                 }                   
                 //Printout
                 System.out.println("After "+id+" has joined ");
-                System.out.println("["+getSelf().path().name()+"] : "+localItems.keySet());
+                System.out.println("[node"+myId+"] : "+localItems.keySet());
             } 
+            else if (message instanceof Leave){
+                nodes.remove(myId);
+                ArrayList<Integer> neighbours = nClockwiseNodes(myId, N);
+                final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
+                for(Integer key : localItems.keySet()){
+                    LocalItem item = localItems.get(key);
+                    repartitionItems.put(key, new ImmutableItem(item.getKey(),
+                                                                    item.getValue(),
+                                                                    item.getVersion()));
+                }    
+
+                for(Integer n: neighbours){
+                    (nodes.get(n)).tell(new ItemList(repartitionItems, true), getSelf());
+                }
+                
+                getContext().stop(getSelf());
+            }
             //When receiving a GetKey request message
             else if (message instanceof GetKey) {
                 //extract the keyId from the message
                 Integer itemKey = ((GetKey) message).keyId;
 
                 //TODO: Check to see if I am coordinator (node1 for testing)
-                if (getSelf().path().name().equals("node2")) {
+                if (getSelf().path().name().equals("node1")) {
 
                     System.out.println("[GET] I AM COORDINATOR NODE " + getSelf().path().name());
                     //keep track of client to later respond
@@ -258,7 +313,6 @@ public class NodeApp {
                             }
                         }
                         // System.out.println("Starting timer");
-                        //timer = new java.util.Timer();   
                         //<start timer somewhere here>
                         setTimoutTask();
                         timer.schedule(timerTask, T);
@@ -268,7 +322,7 @@ public class NodeApp {
                 else {
                     System.out.println("Sleeping 5 sec before replying");
                     try {
-                        sleep(1000);
+                        sleep(100);
                     } catch (InterruptedException ex) {
                         Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
                     }
@@ -293,7 +347,7 @@ public class NodeApp {
                 int itemVersion = ((Update) message).version;
 
                 //TODO: Check to see if I am coordinator (pre-set for testing)
-                if (getSelf().path().name().equals("node2")) {
+                if (getSelf().path().name().equals("node1")) {
 
                     System.out.println("[Update] I AM COORDINATOR NODE " + getSelf().path().name());
 
@@ -457,7 +511,11 @@ public class NodeApp {
                     //unhandled(message);
                     //System.out.println("Not expecting any messages... No quorum initated");
                 }
-            } 
+            }
+            else if(message instanceof Terminated){
+                ActorRef leaver = ((Terminated)message).actor();
+                nodes.values().remove(leaver);
+            }
             //Do not handle messages you don't know
             else {
                 unhandled(message);
@@ -512,7 +570,7 @@ public class NodeApp {
                     TO = true;
                     System.out.println("Timeout here");
                     //timer = null;
-                    client.tell("Timeout", getSelf());
+                    client.tell("Timeout", nodes.get(myId));
                     cleanup();
                 }
             };
