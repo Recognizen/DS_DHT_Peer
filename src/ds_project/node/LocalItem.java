@@ -47,5 +47,8 @@ public class LocalItem implements Serializable{
         this.version = version;
     }
     
-    
+    @Override
+    public String toString(){
+        return this.getKey() + " " + this.getValue() +" " + this.getVersion();
+    }
 }
