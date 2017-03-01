@@ -138,7 +138,7 @@ public class NodeApp {
                 nodes.putAll(((Nodelist) message).nodes);
                 nodes.values().forEach(node -> this.context().watch(node));
 
-                for (Integer node : nClockwiseNodes(myId + 1, 1)) {
+                for (Integer node : this.nClockwiseNodes(myId + 1, 1)) {
                     (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
                 }
             }
@@ -152,20 +152,15 @@ public class NodeApp {
                             || key == id
                             //  || (myId < id && key <= id && key > id) 
                             || (nodes.size() < N)) {
-                        LocalItem item = localItems.get(key);
-                        repartitionItems.put(key, new ImmutableItem(item.getKey(),
-                                item.getValue(),
-                                item.getVersion()));
+                       
+                        repartitionItems.put(key, this.getImmutableItem(key));
                     } else {
                         //System.out.println("Calculating responsible nodes for key :" +key);
                         nodes.put(id, null);
-                        ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
+                        ArrayList<Integer> responsibleNodes = this.nClockwiseNodes(key, N);
                         nodes.remove(id);
                         if (responsibleNodes.contains(id)) {
-                            LocalItem item = localItems.get(key);
-                            repartitionItems.put(key, new ImmutableItem(item.getKey(),
-                                    item.getValue(),
-                                    item.getVersion()));
+                            repartitionItems.put(key, this.getImmutableItem(key));
                         }
                     }
                 }
@@ -174,13 +169,10 @@ public class NodeApp {
             else if (message instanceof Leave) {
                 System.out.println("I have been asked to leave.");
                 nodes.remove(myId);
-                final ArrayList<Integer> neighbours = nClockwiseNodes(myId, N);
+                final ArrayList<Integer> neighbours = this.nClockwiseNodes(myId, N);
                 final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
                 for (Integer key : localItems.keySet()) {
-                    LocalItem item = localItems.get(key);
-                    repartitionItems.put(key, new ImmutableItem(item.getKey(),
-                            item.getValue(),
-                            item.getVersion()));
+                    repartitionItems.put(key, this.getImmutableItem(key));
                 }
 
                 for (Integer n : neighbours) {
@@ -199,7 +191,7 @@ public class NodeApp {
                     if (senderId > key) {
                         ActorRef sender = nodes.get(senderId);
                         nodes.remove(senderId);
-                        ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
+                        ArrayList<Integer> responsibleNodes = this.nClockwiseNodes(key, N);
                         nodes.put(senderId, sender);
                         if (responsibleNodes.contains(myId)) {
                             localItems.put(key, new LocalItem(item.getKey(),
@@ -237,7 +229,7 @@ public class NodeApp {
                     Iterator it = localItems.keySet().iterator();
                     while (it.hasNext()) {
                         Integer key = (Integer) it.next();
-                        ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
+                        ArrayList<Integer> responsibleNodes = this.nClockwiseNodes(key, N);
                         if (!responsibleNodes.contains(myId)) {
                             it.remove();
                         }
@@ -261,18 +253,14 @@ public class NodeApp {
                     bufferedItems = new ArrayList<>();
 
                     //Retrieve Nodes of interest
-                    ArrayList<Integer> interestedNodes = nClockwiseNodes(itemKey, N);
+                    ArrayList<Integer> interestedNodes = this.nClockwiseNodes(itemKey, N);
 
                     //If R = 1 and I am part of the interested nodes then no need to pass through the network
                     if (interestedNodes.contains(myId) && R == 1) {
                         //simply reply to client
-                        LocalItem item = localItems.get(itemKey);
-                        client.tell(new DataItem(new ImmutableItem(
-                                item.getKey(),
-                                item.getValue(),
-                                item.getVersion())), getSelf());
+                        client.tell(new DataItem(this.getImmutableItem(itemKey)), getSelf());
                         //and cleanup variables state
-                        cleanup();
+                        this.cleanup();
                     } //for when contacting other peers is needed
                     else {
                         for (Integer node : interestedNodes) {
@@ -297,7 +285,7 @@ public class NodeApp {
                     }
                 } //I am simply a peer, I just need to return my local copy
                 else {
-                    System.out.println("Sleeping 5 sec before replying");
+                    System.out.println("Sleeping before replying");
                     try {
                         sleep(100);
                     } catch (InterruptedException ex) {
@@ -307,11 +295,7 @@ public class NodeApp {
                     //respond to the sender with the local dataItem having that key or a "not present" dataItem
                     DataItem dataItem = new DataItem(new ImmutableItem(itemKey, "", 0));
                     if (localItems.containsKey(itemKey)) {
-                        LocalItem item = localItems.get(itemKey);
-                        dataItem = new DataItem(new ImmutableItem(
-                                item.getKey(),
-                                item.getValue(),
-                                item.getVersion()));
+                        dataItem = new DataItem(this.getImmutableItem(itemKey));
                     }
                     getSender().tell(dataItem, getSelf());
                 }
@@ -340,7 +324,7 @@ public class NodeApp {
 
                     LocalItem item = new LocalItem(itemKey, "", 0);
                     //Retrieve Nodes of interest
-                    ArrayList<Integer> interestedNodes = nClockwiseNodes(itemKey, N);
+                    ArrayList<Integer> interestedNodes = this.nClockwiseNodes(itemKey, N);
 
                     //If R = W = 1 and I am part of the interested nodes then no need to pass through the network
                     if (interestedNodes.contains(myId) && R == 1 && W == 1) {
@@ -356,7 +340,7 @@ public class NodeApp {
 
                         localItems.put(itemKey, latestItem);
                         //and cleanup variables state
-                        cleanup();
+                        this.cleanup();
                     } else {
                         for (Integer node : interestedNodes) {
                             //If I am interested
@@ -439,7 +423,7 @@ public class NodeApp {
                                         latestItem.getVersion())), getSelf());
 
                                 //for every interestedNode
-                                for (Integer node : nClockwiseNodes(latestItem.getKey(), N)) {
+                                for (Integer node : this.nClockwiseNodes(latestItem.getKey(), N)) {
                                     //If I am interested
                                     if (node.equals(myId)) {
                                         //perform local update
@@ -463,7 +447,7 @@ public class NodeApp {
                             }
                         }
                         //quorum reached - cleanup
-                        cleanup();
+                        this.cleanup();
                     } //messages after quorum reached are not needed
                     else {
                         unhandled(message);
@@ -538,6 +522,15 @@ public class NodeApp {
             latestItem = null;
             timerTask = null;
             TO = false;
+        }
+        
+        public ImmutableItem getImmutableItem(int itemKey){
+            LocalItem item = localItems.get(itemKey);
+            
+            return new ImmutableItem(item.getKey(),
+                                     item.getValue(),
+                                     item.getVersion());
+            
         }
 
         public void setTimoutTask() {
