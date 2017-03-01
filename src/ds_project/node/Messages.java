@@ -91,15 +91,18 @@ public class Messages {
 
         final Map<Integer, ImmutableItem> items;
         final boolean leave;
+        final int senderId;
 
-        public ItemList(Map<Integer, ImmutableItem> items) {
+        public ItemList(Map<Integer, ImmutableItem> items, int senderId) {
             this.items = Collections.unmodifiableMap(new HashMap<>(items));
             this.leave = false;
+            this.senderId = senderId;
         }
         
-        public ItemList(Map<Integer, ImmutableItem> items, boolean leave) {
+        public ItemList(Map<Integer, ImmutableItem> items, int senderId , boolean leave) {
             this.items = Collections.unmodifiableMap(new HashMap<>(items));
             this.leave = leave;
+            this.senderId = senderId;
         }
     }
 

@@ -33,7 +33,7 @@ public class NodeApp {
     //Timeout Interval in ms
     static final private int T = 3000;
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
 
         if (args.length != 1 && args.length != 3) {
             System.out.println("Wrong number of arguments: [conf] (+ [remote_ip remote_port] )");
@@ -56,7 +56,7 @@ public class NodeApp {
 
         // Create the actor system
         final ActorSystem system = ActorSystem.create("mysystem", config);
-
+        
         // Create a single node actor
         final ActorRef receiver = system.actorOf(
                 Props.create(Node.class), // actor class 
@@ -64,60 +64,28 @@ public class NodeApp {
         );
 
         if (args[0].equals("node3")) {
-            
-            try {
-                sleep(1000);
-            } catch (InterruptedException ex) {
-                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
-            }
+            System.out.println("Sending Leave Message");
+            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10004/user/node4").tell(new Leave(), receiver);
 
-            
-            
-            System.out.println("-------------> Trying to send message");
+            sleep(1000);
             system.actorSelection(remotePath).tell(new Update(1, "truffles"), receiver);
             //system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(1), receiver);
 
-            try {
-                sleep(3000);
-            } catch (InterruptedException ex) {
-                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
-            }
-            
-            system.actorSelection(remotePath).tell(new Update(61, "sixtyone"), receiver);
-            //system.actorSelection(remotePath).tell(new Update(2, "truffles"), receiver);
-           // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
+            sleep(1000);
+            system.actorSelection(remotePath).tell(new GetKey(1), receiver);
+            // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
 
-            try {
-                sleep(3000);
-            } catch (InterruptedException ex) {
-                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
-            }
-            
+            sleep(1000);
             system.actorSelection(remotePath).tell(new Update(3, "jenny"), receiver);
-            try {
-                sleep(3000);
-            } catch (InterruptedException ex) {
-                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
-            }
-            
-            system.actorSelection(remotePath).tell(new GetKey(2), receiver); 
-            //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
-           // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
 
-            //system.actorSelection(remotePath).tell(new GetKey(2), receiver);
-        }
-        else if (args[0].equals("node4")){
-               try {
-                sleep(1000);
-            } catch (InterruptedException ex) {
-                Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
-            }
+            sleep(1000);
+            system.actorSelection(remotePath).tell(new GetKey(3), receiver);
+            // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
 
-            
-            
+        } else if (args[0].equals("node4")) {
+            sleep(1000);
             System.out.println("-------------> Trying to send leave message");
-            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10003/user/node90").tell(new Leave(), receiver);
-        
+            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10003/user/node3").tell(new Leave(), receiver);
         }
     }
 
@@ -154,7 +122,7 @@ public class NodeApp {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
             }
             nodes.put(myId, getSelf());
-           /* localItems.put(1, new LocalItem(1,"test"+1 ,1));   
+            /* localItems.put(1, new LocalItem(1,"test"+1 ,1));   
             localItems.put(2, new LocalItem(2,"test"+2 ,1)); 
             localItems.put(3, new LocalItem(3,"test"+3 ,1));
             localItems.put(100, new LocalItem(100,"test"+100 ,1)); 
@@ -166,108 +134,119 @@ public class NodeApp {
 
             if (message instanceof RequestNodelist) {
                 getSender().tell(new Nodelist(nodes), getSelf());
-            } 
-            else if (message instanceof Nodelist) {
+            } else if (message instanceof Nodelist) {
                 nodes.putAll(((Nodelist) message).nodes);
                 nodes.values().forEach(node -> this.context().watch(node));
-                
-                for (Integer node : nClockwiseNodes(myId+1, 1)) {
+
+                for (Integer node : nClockwiseNodes(myId + 1, 1)) {
                     (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
                 }
-            } 
+            }
             //Return the nodes the requester is responsible for
             if (message instanceof RequestItemlist) {
-                final int id = ((RequestItemlist)message).id;
+                final int id = ((RequestItemlist) message).id;
                 final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
-                
-                for(Integer key : localItems.keySet()){
-                    if( (myId > id && key < myId) 
+
+                for (Integer key : localItems.keySet()) {
+                    if ((myId > id && key < myId)
                             || key == id
-                          //  || (myId < id && key <= id && key > id) 
-                            || (nodes.size() < N)){
+                            //  || (myId < id && key <= id && key > id) 
+                            || (nodes.size() < N)) {
                         LocalItem item = localItems.get(key);
                         repartitionItems.put(key, new ImmutableItem(item.getKey(),
-                                                                    item.getValue(),
-                                                                    item.getVersion()));
-                    }
-                    else{
+                                item.getValue(),
+                                item.getVersion()));
+                    } else {
                         //System.out.println("Calculating responsible nodes for key :" +key);
                         nodes.put(id, null);
                         ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
                         nodes.remove(id);
-                        if(responsibleNodes.contains(id)){
+                        if (responsibleNodes.contains(id)) {
                             LocalItem item = localItems.get(key);
                             repartitionItems.put(key, new ImmutableItem(item.getKey(),
-                                                                    item.getValue(),
-                                                                    item.getVersion()));
-                         }
+                                    item.getValue(),
+                                    item.getVersion()));
+                        }
                     }
                 }
-                getSender().tell(new ItemList(repartitionItems), getSelf());
-            } 
-            //Receiving items I am responsible for
-            else if (message instanceof ItemList){
-                final Map<Integer, ImmutableItem> receivedItems = ((ItemList)message).items;
+                getSender().tell(new ItemList(repartitionItems, myId), getSelf());
+            } //received Leave message
+            else if (message instanceof Leave) {
+                System.out.println("I have been asked to leave.");
+                nodes.remove(myId);
+                final ArrayList<Integer> neighbours = nClockwiseNodes(myId, N);
+                final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
+                for (Integer key : localItems.keySet()) {
+                    LocalItem item = localItems.get(key);
+                    repartitionItems.put(key, new ImmutableItem(item.getKey(),
+                            item.getValue(),
+                            item.getVersion()));
+                }
+
+                for (Integer n : neighbours) {
+                    (nodes.get(n)).tell(new ItemList(repartitionItems, myId, true), getSelf());
+                }
+                System.out.println("Attempting stop!");
+                getContext().stop(getSelf());
+            } //Receiving items I am responsible for
+            else if (message instanceof ItemList) {
+                final int senderId = ((ItemList) message).senderId;
+                final Map<Integer, ImmutableItem> receivedItems = ((ItemList) message).items;
                 //Add them to my localItems
-                for(Integer key : receivedItems.keySet()){
+                for (Integer key : receivedItems.keySet()) {
                     ImmutableItem item = receivedItems.get(key);
-                    localItems.put(key, new LocalItem(item.getKey(),
-                                                      item.getValue(),
-                                                      item.getVersion()));
+                    System.out.println(senderId + " < " + key);
+                    if (senderId > key) {
+                        ActorRef sender = nodes.get(senderId);
+                        nodes.remove(senderId);
+                        ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
+                        nodes.put(senderId, sender);
+                        if (responsibleNodes.contains(myId)) {
+                            localItems.put(key, new LocalItem(item.getKey(),
+                                    item.getValue(),
+                                    item.getVersion()));
+                        }
+
+                    } else {
+                        localItems.put(key, new LocalItem(item.getKey(),
+                                item.getValue(),
+                                item.getVersion()));
+                    }
                 }
                 //Then persist
-                System.out.println("Received "+ receivedItems.keySet());
-                
-                if(!((ItemList)message).leave){
+                System.out.println("Received " + receivedItems.keySet());
+
+                if (!((ItemList) message).leave) {
                     //Announce my joining                
                     for (ActorRef n : nodes.values()) {
-                            n.tell(new Join(myId), getSelf());
+                        n.tell(new Join(myId), getSelf());
                     }
-                }
-                else{
-                    System.out.println(getSender().path() + " is leaving ["+nodes.size());
+                } else {
+                    System.out.println(getSender().path() + " is leaving [" + nodes.size());
                     nodes.values().remove(getSender());
-                    System.out.println(getSender().path() + " is leaving ["+nodes.size());
+                    System.out.println(getSender().path() + " is leaving [" + nodes.size());
                 }
-            }
-            else if (message instanceof Join) {
+            } else if (message instanceof Join) {
                 int id = ((Join) message).id;
                 System.out.println("Node " + id + " joined");
                 nodes.put(id, getSender());
-                
+
                 this.context().watch(getSender());
-                
-                if(myId != id && !localItems.isEmpty()){
+
+                if (myId != id && !localItems.isEmpty()) {
                     Iterator it = localItems.keySet().iterator();
-                    while(it.hasNext()){
+                    while (it.hasNext()) {
                         Integer key = (Integer) it.next();
                         ArrayList<Integer> responsibleNodes = nClockwiseNodes(key, N);
-                        if(!responsibleNodes.contains(myId))
+                        if (!responsibleNodes.contains(myId)) {
                             it.remove();
+                        }
                     }
-                }                   
-                //Printout
-                System.out.println("After "+id+" has joined ");
-                System.out.println("[node"+myId+"] : "+localItems.keySet());
-            } 
-            else if (message instanceof Leave){
-                nodes.remove(myId);
-                ArrayList<Integer> neighbours = nClockwiseNodes(myId, N);
-                final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
-                for(Integer key : localItems.keySet()){
-                    LocalItem item = localItems.get(key);
-                    repartitionItems.put(key, new ImmutableItem(item.getKey(),
-                                                                    item.getValue(),
-                                                                    item.getVersion()));
-                }    
-
-                for(Integer n: neighbours){
-                    (nodes.get(n)).tell(new ItemList(repartitionItems, true), getSelf());
                 }
-                
-                getContext().stop(getSelf());
-            }
-            //When receiving a GetKey request message
+                //Printout
+                System.out.println("After " + id + " has joined ");
+                System.out.println("[node" + myId + "] : " + localItems.keySet());
+            } //When receiving a GetKey request message
             else if (message instanceof GetKey) {
                 //extract the keyId from the message
                 Integer itemKey = ((GetKey) message).keyId;
@@ -289,10 +268,9 @@ public class NodeApp {
                         //simply reply to client
                         LocalItem item = localItems.get(itemKey);
                         client.tell(new DataItem(new ImmutableItem(
-                                                    item.getKey(),
-                                                    item.getValue(),
-                                                    item.getVersion()))
-                                    , getSelf());
+                                item.getKey(),
+                                item.getValue(),
+                                item.getVersion())), getSelf());
                         //and cleanup variables state
                         cleanup();
                     } //for when contacting other peers is needed
@@ -317,8 +295,7 @@ public class NodeApp {
                         setTimoutTask();
                         timer.schedule(timerTask, T);
                     }
-                } 
-                //I am simply a peer, I just need to return my local copy
+                } //I am simply a peer, I just need to return my local copy
                 else {
                     System.out.println("Sleeping 5 sec before replying");
                     try {
@@ -332,14 +309,13 @@ public class NodeApp {
                     if (localItems.containsKey(itemKey)) {
                         LocalItem item = localItems.get(itemKey);
                         dataItem = new DataItem(new ImmutableItem(
-                                                    item.getKey(),
-                                                    item.getValue(),
-                                                    item.getVersion()));
+                                item.getKey(),
+                                item.getValue(),
+                                item.getVersion()));
                     }
                     getSender().tell(dataItem, getSelf());
                 }
-            } 
-            //When receiving an Update request message
+            } //When receiving an Update request message
             else if (message instanceof Update) {
                 //extract the keyId from the message
                 Integer itemKey = ((Update) message).keyId;
@@ -374,11 +350,10 @@ public class NodeApp {
                         latestItem.setVersion(item.getVersion() + 1);
                         //simply reply to client
                         client.tell(new DataItem(new ImmutableItem(
-                                                       latestItem.getKey(),
-                                                       latestItem.getValue(),
-                                                       latestItem.getVersion()))
-                                   , getSelf());
-                        
+                                latestItem.getKey(),
+                                latestItem.getValue(),
+                                latestItem.getVersion())), getSelf());
+
                         localItems.put(itemKey, latestItem);
                         //and cleanup variables state
                         cleanup();
@@ -402,8 +377,7 @@ public class NodeApp {
                         setTimoutTask();
                         timer.schedule(timerTask, T);
                     }
-                } 
-                //I am peer so I should just write
+                } //I am peer so I should just write
                 else {
                     System.out.println("[Update] I AM PEER NODE " + getSelf().path().name());
                     //simply write the Item I received
@@ -411,8 +385,7 @@ public class NodeApp {
                     //save or replace the Item
                     localItems.put(itemKey, newItem);
                 }
-            } 
-            //When receiving a DataItem as response
+            } //When receiving a DataItem as response
             else if (message instanceof DataItem) {
                 System.out.println("TO status: " + TO);
                 //if not null then I previously initiated a read quorum request 
@@ -427,7 +400,7 @@ public class NodeApp {
                             || (bufferedItems.size() < Integer.max(R, W) && writeQuorum)) {
                         //buffer the freshly received Item
                         ImmutableItem item = ((DataItem) message).item;
-                        bufferedItems.add(new LocalItem(item.getKey(),item.getValue(),item.getVersion()));
+                        bufferedItems.add(new LocalItem(item.getKey(), item.getValue(), item.getVersion()));
                     }
                     System.out.println("THIS IS SIZE " + bufferedItems.size());
                     System.out.println(bufferedItems.toString());
@@ -461,10 +434,9 @@ public class NodeApp {
                                 System.out.println("Responding to: " + client.path().name() + " with " + latestItem.getKey() + " " + latestItem.getVersion());
                                 //TODO: Answer client - successful write
                                 client.tell(new DataItem(new ImmutableItem(
-                                                            latestItem.getKey(),
-                                                            latestItem.getValue(),
-                                                            latestItem.getVersion()))
-                                            , getSelf());
+                                        latestItem.getKey(),
+                                        latestItem.getValue(),
+                                        latestItem.getVersion())), getSelf());
 
                                 //for every interestedNode
                                 for (Integer node : nClockwiseNodes(latestItem.getKey(), N)) {
@@ -481,29 +453,25 @@ public class NodeApp {
                                                         latestItem.getVersion()), getSelf());
                                     }
                                 }
-                            } 
-                            //readQuorum = !writeQuorum
+                            } //readQuorum = !writeQuorum
                             else {
                                 System.out.println("Sending answer to " + client.path().name());
                                 client.tell(new DataItem(new ImmutableItem(
-                                                       latestItem.getKey(),
-                                                       latestItem.getValue(),
-                                                       latestItem.getVersion()))
-                                            , getSelf());
+                                        latestItem.getKey(),
+                                        latestItem.getValue(),
+                                        latestItem.getVersion())), getSelf());
                             }
                         }
                         //quorum reached - cleanup
                         cleanup();
-                    } 
-                    //messages after quorum reached are not needed
-                    else 
-                    {
+                    } //messages after quorum reached are not needed
+                    else {
                         unhandled(message);
                     }
-                } 
-                else {
-                    if (TO == true)
+                } else {
+                    if (TO == true) {
                         System.out.println("Timedout");
+                    }
                     System.out.println(((DataItem) message).item.getKey() + " "
                             + ((DataItem) message).item.getValue() + " "
                             + ((DataItem) message).item.getVersion());
@@ -511,15 +479,24 @@ public class NodeApp {
                     //unhandled(message);
                     //System.out.println("Not expecting any messages... No quorum initated");
                 }
-            }
-            else if(message instanceof Terminated){
-                ActorRef leaver = ((Terminated)message).actor();
+            } else if (message instanceof Terminated) {
+                ActorRef leaver = ((Terminated) message).actor();
+                System.out.println("Received terminated message from " + leaver.path());
                 nodes.values().remove(leaver);
-            }
-            //Do not handle messages you don't know
+
+                //Printout
+                System.out.println("After node3 leaves ");
+                System.out.println("[node" + myId + "] : " + localItems.keySet());
+            } //Do not handle messages you don't know
             else {
                 unhandled(message);
             }
+        }
+
+        @Override
+        public void postStop() {
+            System.out.print("I have stopped!");
+            //System.exit(0);
         }
 
         //check on number of nodes should be done earlier
