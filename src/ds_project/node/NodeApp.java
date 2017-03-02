@@ -7,10 +7,11 @@ import akka.actor.ActorRef;
 import akka.actor.UntypedActor;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
-import akka.actor.Terminated;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
 import ds_project.node.Messages.*;
+import java.io.File;
+import java.io.IOException;
 import static java.lang.Thread.sleep;
 import java.util.Iterator;
 import java.util.Set;
@@ -22,11 +23,12 @@ public class NodeApp {
 
     static private String remotePath = null; // Akka path of the bootstrapping peer
     static private int myId; // ID of the local node    
+    static private boolean recover = false;
 
     //Replication Parameters
-    static final private int N = 2;
-    static final private int R = 2;
-    static final private int W = 2;
+    static final private int N = 1;
+    static final private int R = 1;
+    static final private int W = 1;
 
     //Timeout Interval in ms
     static final private int T = 3000;
@@ -60,10 +62,11 @@ public class NodeApp {
                 Props.create(Node.class), // actor class 
                 args[0] // actor name
         );
-
+        
         if (args[0].equals("node3")) {
-            System.out.println("Sending Leave Message");
-            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10004/user/node4").tell(new Leave(), receiver);
+          //  recover = true;
+            //System.out.println("Sending Leave Message");
+            //system.actorSelection("akka.tcp://mysystem@127.0.0.1:10004/user/node4").tell(new Leave(), receiver);
 
             sleep(1000);
             system.actorSelection(remotePath).tell(new Update(1, "truffles"), receiver);
@@ -74,25 +77,32 @@ public class NodeApp {
             // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
 
             sleep(1000);
-            system.actorSelection(remotePath).tell(new Update(3, "jenny"), receiver);
+            system.actorSelection(remotePath).tell(new Update(19, "jenny"), receiver);
 
             sleep(1000);
-            system.actorSelection(remotePath).tell(new GetKey(3), receiver);
+            system.actorSelection(remotePath).tell(new GetKey(19), receiver);
             // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
-
-        } else if (args[0].equals("node4")) {
+           // sleep(10000);
+          //  receiver.tell(Kill.getInstance(), receiver);*/
+        } else if (args[0].equals("node5")) {
             sleep(1000);
             System.out.println("-------------> Trying to send leave message");
             system.actorSelection("akka.tcp://mysystem@127.0.0.1:10003/user/node3").tell(new Leave(), receiver);
         }
+        else{
+            
+          //  system.actorSelection(remotePath).tell(new Update(50, "fgdf"), receiver);
+            sleep(1000);
+          //  system.actorSelection(remotePath).tell(new GetKey(50), receiver);
+           // recover = true;
+        }
     }
-
     public static class Node extends UntypedActor {
 
         // The table of all nodes in the system id->ref
         private final Map<Integer, ActorRef> nodes = new TreeMap<>();
         //In-Memory copy of the stored Items
-        private final Map<Integer, LocalItem> localItems = new HashMap<>();
+        private Map<Integer, LocalItem> localItems = new HashMap<>();
 
         //Variables used when peer is coordinator
         //to buffer messages until quorum is reached
@@ -114,10 +124,18 @@ public class NodeApp {
         private boolean TIMEOUT = false;
 
         @Override
-        public void preStart() {
+        public void preStart() throws IOException {
             //retrieve persistedStore if exists here
+            if(recover){
+                System.out.println("Attempting recovery");
+                File file = new File(getSelf().path().name());
+                if(file.exists()){
+                    localItems = PersistanceSupport.retrieveStore(getSelf().path().name());
+                    System.out.println("Retrieved items from store "+ localItems.size());
+                }
+            }
             if (remotePath != null) {
-                getContext().actorSelection(remotePath).tell(new RequestNodelist(), getSelf());
+                getContext().actorSelection(remotePath).tell(new RequestNodelist(myId), getSelf());
             }
             nodes.put(myId, getSelf());
             /* localItems.put(1, new LocalItem(1,"test"+1 ,1));   
@@ -128,24 +146,64 @@ public class NodeApp {
         }
 
         @Override
-        public void onReceive(Object message){
+        public void onReceive(Object message) throws IOException{
 
-            if (message instanceof RequestNodelist){
-                getSender().tell(new Nodelist(nodes), getSelf());
+            if (message instanceof RequestNodelist){  
+                final int id = ((RequestNodelist) message).id;
+                if(nodes.containsKey(id)){
+                    System.out.println("Requester is recovering node");
+                    nodes.remove(id);
+                    
+                    System.out.println("After " + id + " has recovered ");
+                    System.out.println("[node" + myId + "] : " + localItems.keySet());
+                    
+                    for(ActorRef node : nodes.values())
+                            node.tell(new UpdateRef(id, getSender()), getSelf());
+                    nodes.put(id, getSender());
+                }
+                
+                getSender().tell(new Nodelist(nodes), getSelf());                
             } 
             
             else if (message instanceof Nodelist){
                 nodes.putAll(((Nodelist) message).nodes);
                 //For each ActorRef watch nodes (in order to receive Termination messages when node stops)
-                nodes.values().forEach(node -> this.context().watch(node));
-
-                for (Integer node : this.nClockwiseNodes(myId + 1, 1)) {
-                    (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
+               // nodes.values().forEach(node -> this.context().watch(node));
+                
+                if(!recover){
+                    for (Integer node : this.nClockwiseNodes(myId + 1, 1)) {
+                        (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
+                    }
+                }
+                //I am recovering - Check if keys still my responsibility
+                else{
+                    Iterator it = localItems.keySet().iterator();
+                    while (it.hasNext()) {
+                        Integer key = (Integer) it.next();
+                        ArrayList<Integer> responsibleNodes = this.nClockwiseNodes(key, N);
+                        if (!responsibleNodes.contains(myId)) {
+                            it.remove();
+                        }
+                    }
+                    
+                    System.out.println("After I recovered ");
+                    System.out.println("[node" + myId + "] : " + localItems.keySet());
                 }
             }
             
+            //Receive a new reference for a certain node
+            else if(message instanceof UpdateRef){
+                final int id = ((UpdateRef) message).id;
+                System.out.println("Updating ref for node"+id);
+                final ActorRef newRef = ((UpdateRef) message).actor;
+                nodes.put(id, newRef);
+                
+                System.out.println("After " + id + " has recovered ");
+                System.out.println("[node" + myId + "] : " + localItems.keySet());
+            }
+            
             //Return the nodes the requester is responsible for
-            if (message instanceof RequestItemlist){
+            else if (message instanceof RequestItemlist){
                 final int id = ((RequestItemlist) message).id;
                 final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
 
@@ -178,6 +236,11 @@ public class NodeApp {
                 final ArrayList<Integer> neighbours = this.nClockwiseNodes(myId, N);
                 for (Integer n : neighbours) {
                     (nodes.get(n)).tell(new ItemList(repartitionItems, myId, true), getSelf());
+                }
+                
+                for(Integer node : nodes.keySet()){
+                    System.out.println("Sending terminated");
+                    nodes.get(node).tell(new Terminated(), getSelf());
                 }
                 
                 System.out.println("Attempting stop!");
@@ -213,7 +276,9 @@ public class NodeApp {
                                 item.getVersion()));
                     }
                 }
-                //Then persist
+                
+                PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                
                 System.out.println("Received " + receivedItems.keySet());
 
                 //if it is not from a Leaver then it is for when I join
@@ -230,7 +295,7 @@ public class NodeApp {
                 System.out.println("Node " + id + " joined");
                 nodes.put(id, getSender());
 
-                this.context().watch(getSender());
+               // this.context().watch(getSender());
 
                 if (myId != id && !localItems.isEmpty()) {
                     Iterator it = localItems.keySet().iterator();
@@ -242,6 +307,8 @@ public class NodeApp {
                         }
                     }
                 }
+                PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                
                 //Printout
                 System.out.println("After " + id + " has joined ");
                 System.out.println("[node" + myId + "] : " + localItems.keySet());
@@ -353,6 +420,7 @@ public class NodeApp {
                                 latestItem.getVersion())), getSelf());
 
                         localItems.put(itemKey, latestItem);
+                        PersistanceSupport.persistStore(localItems, getSelf().path().name());
                         //and cleanup variables state
                         this.cleanup();
                     } else {
@@ -382,6 +450,7 @@ public class NodeApp {
                     LocalItem newItem = new LocalItem(itemKey, itemValue, itemVersion);
                     //save or replace the Item
                     localItems.put(itemKey, newItem);
+                    PersistanceSupport.persistStore(localItems, getSelf().path().name());
                 }
             } 
 
@@ -439,6 +508,7 @@ public class NodeApp {
                                     if (node.equals(myId)) {
                                         //perform local update
                                         localItems.put(latestItem.getKey(), latestItem);
+                                        PersistanceSupport.persistStore(localItems, getSelf().path().name());
                                     } //If different node
                                     else {
                                         //send Update request to other interestedNodes with latest Item
@@ -477,10 +547,9 @@ public class NodeApp {
             } 
             
             else if (message instanceof Terminated) {
-                ActorRef leaver = ((Terminated) message).actor();
-                System.out.println("Received terminated message from " + leaver.path());
-                nodes.values().remove(leaver);
-
+                System.out.println("Received terminated message from " + getSender().path());
+                nodes.values().remove(getSender());
+                
                 //Printout
                 System.out.println("After node3 leaves ");
                 System.out.println("[node" + myId + "] :" + localItems.keySet());
@@ -495,7 +564,7 @@ public class NodeApp {
         @Override
         public void postStop() {
             System.out.print("I have stopped!");
-           // System.exit(0);
+            System.exit(0);
         }
 
         //check on number of nodes should be done earlier

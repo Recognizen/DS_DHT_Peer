@@ -26,7 +26,7 @@ public class Messages {
         public Update(int keyId, String value) {
             this.keyId = keyId;
             this.value = value;
-            this.version = 1;
+            this.version = 0;
         }
 
         public Update(int keyId, String value, int version) {
@@ -56,6 +56,11 @@ public class Messages {
 
     // ****** Messages needed to establish DHT network *****
     public static class RequestNodelist implements Serializable {
+        final int id;
+
+        public RequestNodelist(int id) {
+            this.id = id;
+        }
     }    
 
 
@@ -77,6 +82,9 @@ public class Messages {
     }
     
     public static class Leave implements Serializable {
+    } 
+    
+    public static class Terminated implements Serializable {
     }
     
     public static class RequestItemlist implements Serializable {
@@ -129,6 +137,16 @@ public class Messages {
         public int getVersion() {
             return version;
         }
+    }
+    
+    
+    public static class UpdateRef implements Serializable {
+        final int id;
+        final ActorRef actor;
 
+        public UpdateRef(int id, ActorRef actor) {
+            this.id = id;
+            this.actor = actor;
+        }
     }
 }
