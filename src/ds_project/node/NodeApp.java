@@ -26,9 +26,9 @@ public class NodeApp {
     static private boolean recover = false;
 
     //Replication Parameters
-    static final private int N = 1;
-    static final private int R = 1;
-    static final private int W = 1;
+    static final private int N = 2;
+    static final private int R = 2;
+    static final private int W = 2;
 
     //Timeout Interval in ms
     static final private int T = 3000;
@@ -208,7 +208,7 @@ public class NodeApp {
                 final Map<Integer, ImmutableItem> repartitionItems = new HashMap<>();
 
                 for (Integer key : localItems.keySet()) {
-                    if ((nodes.size() < N) || (myId > id && key < myId) || key == id) {
+                    if ((nodes.size() < N) || /*(myId > id && key < myId) ||*/ key == id) {//optimization logic problem
                         repartitionItems.put(key, this.getImmutableItem(key));
                     } 
                     else{                        
@@ -414,10 +414,7 @@ public class NodeApp {
                         }
                         latestItem.setVersion(item.getVersion() + 1);
                         //simply reply to client
-                        client.tell(new DataItem(new ImmutableItem(
-                                latestItem.getKey(),
-                                latestItem.getValue(),
-                                latestItem.getVersion())), getSelf());
+                        client.tell("Success", getSelf());
 
                         localItems.put(itemKey, latestItem);
                         PersistanceSupport.persistStore(localItems, getSelf().path().name());
