@@ -139,7 +139,6 @@ public class Messages {
         }
     }
     
-    
     public static class UpdateRef implements Serializable {
         final int id;
         final ActorRef actor;
