@@ -27,12 +27,12 @@ public class NodeApp {
     static private boolean recover = false;
 
     //Replication Parameters
-    static final private int N = 2;
-    static final private int R = 2;
-    static final private int W = 2;
+    static final private int N = 1;
+    static final private int R = 1;
+    static final private int W = 1;
 
     //Timeout Interval in ms
-    static final private int T = 100;
+    static final private int T = 1000;
 
     public static void main(String[] args) throws InterruptedException {
 
@@ -44,11 +44,12 @@ public class NodeApp {
         // Load the "application.conf"
         Config config = ConfigFactory.load(args[0]);
         myId = config.getInt("nodeapp.id");
-        fileName = "node"+myId+".txt";
-        
+        fileName = "node" + myId + ".txt";
+
         if (args.length == 4) {
-            if(args[1].equals("recover"))
+            if (args[1].equals("recover")) {
                 recover = true;
+            }
             // Starting with a bootstrapping node
             String ip = args[2];
             String port = args[3];
@@ -58,7 +59,7 @@ public class NodeApp {
         } else {
             System.out.println("Starting disconnected node " + myId);
         }
-        
+
         // Create the actor system
         final ActorSystem system = ActorSystem.create("DHTsystem", config);
 
@@ -194,7 +195,7 @@ public class NodeApp {
                 if (getSender().path().name().equals("client")) {
                     client = getSender();
                 }
-                
+
                 System.out.println("I have been asked to leave.");
                 nodes.remove(myId);
 
@@ -212,11 +213,11 @@ public class NodeApp {
                     System.out.println("Sending terminated");
                     nodes.get(node).tell(new Terminated(), getSelf());
                 }
-                
-                if(client != null){
+
+                if (client != null) {
                     client.tell(new Terminated(), getSelf());
                 }
-                
+
                 System.out.println("Attempting stop!");
                 getContext().stop(getSelf());
             } //Receiving items I am responsible for
@@ -289,8 +290,8 @@ public class NodeApp {
             else if (message instanceof GetKey) {
                 //extract the keyId from the message
                 final int itemKey = ((GetKey) message).keyId;
-                
-                //TODO: Check to see if I am coordinator (node1 for testing)
+
+                //Check to see if I am coordinator (request coming from a client)
                 if (getSender().path().name().equals("client")) {
                     if (bufferedItems == null) {
                         System.out.println("[GET] I AM COORDINATOR NODE " + getSelf().path().name());
@@ -357,7 +358,7 @@ public class NodeApp {
                 final String itemValue = ((Update) message).value;
                 final int itemVersion = ((Update) message).version;
 
-                //TODO: Check to see if I am coordinator (pre-set for testing)
+                //Check to see if I am coordinator (request coming from client)
                 if (getSender().path().name().equals("client")) {
 
                     if (bufferedItems == null) {
@@ -385,7 +386,7 @@ public class NodeApp {
                             }
                             latestItem.setVersion(item.getVersion() + 1);
                             //simply reply to client
-                            client.tell("Success", getSelf());
+                            client.tell("Successful write for key " + latestItem.getKey(), getSelf());
 
                             localItems.put(itemKey, latestItem);
                             PersistanceSupport.persistStore(localItems, fileName);
@@ -469,8 +470,8 @@ public class NodeApp {
                                     latestItem.setVersion(latestItem.getVersion() + 1);
 
                                     System.out.println("Write Quorum achieved! Responding to: " + client.path().name());
-                                    //TODO: Answer client - successful write
-                                    client.tell("Success", getSelf());
+                                    //Answer client - successful write
+                                    client.tell("Successful write for key " + latestItem.getKey(), getSelf());
 
                                     //for every interestedNode
                                     for (Integer node : this.nClockwiseNodes(latestItem.getKey(), N)) {
@@ -518,7 +519,7 @@ public class NodeApp {
                     nodes.values().remove(getSender());
 
                     //Printout
-                    System.out.println("After "+getSender().path().toString() + " leaves");
+                    System.out.println("After " + getSender().path().toString() + " leaves");
                     System.out.println("[node" + myId + "] :" + localItems.keySet());
                 }
             } //Do not handle messages you don't know
@@ -576,10 +577,12 @@ public class NodeApp {
         public ImmutableItem getImmutableItem(int itemKey) {
             LocalItem item = localItems.get(itemKey);
 
-            return new ImmutableItem(item.getKey(),
-                    item.getValue(),
-                    item.getVersion());
-
+            if (item != null) {
+                return new ImmutableItem(item.getKey(),
+                        item.getValue(),
+                        item.getVersion());
+            }
+            return null;
         }
 
         public void setTimoutTask() {
@@ -588,7 +591,7 @@ public class NodeApp {
                 public void run() {
                     TIMEOUT = true;
                     System.out.println("TIMEOUT here");
-                    client.tell("TIMEOUT", getSelf());
+                    client.tell("TIMEDOUT before quorum is reached!", getSelf());
                     cleanup();
                 }
             };
