@@ -36,8 +36,8 @@ public class NodeApp {
 
     public static void main(String[] args) throws InterruptedException {
 
-        if (args.length != 1 && args.length != 3) {
-            System.out.println("Wrong number of arguments: [conf] (+ [remote_ip remote_port] )");
+        if (args.length != 1 && args.length != 4) {
+            System.out.println("Wrong number of arguments: [conf] (+ operation + [remote_ip remote_port] )");
             return;
         }
 
@@ -45,10 +45,13 @@ public class NodeApp {
         Config config = ConfigFactory.load(args[0]);
         myId = config.getInt("nodeapp.id");
         fileName = "node"+myId+".txt";
-        if (args.length == 3) {
+        
+        if (args.length == 4) {
+            if(args[1].equals("recover"))
+                recover = true;
             // Starting with a bootstrapping node
-            String ip = args[1];
-            String port = args[2];
+            String ip = args[2];
+            String port = args[3];
             // The Akka path to the bootstrapping peer
             remotePath = "akka://DHTsystem@" + ip + ":" + port + "/user/node";
             System.out.println("Starting node " + myId + "; bootstrapping node: " + ip + ":" + port);
