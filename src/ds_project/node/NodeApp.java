@@ -26,12 +26,12 @@ public class NodeApp {
     static private boolean recover = false;
 
     //Replication Parameters
-    static final private int N = 1;
-    static final private int R = 1;
-    static final private int W = 1;
+    static final private int N = 2;
+    static final private int R = 2;
+    static final private int W = 2;
 
     //Timeout Interval in ms
-    static final private int T = 3000;
+    static final private int T = 100;
 
     public static void main(String[] args) throws InterruptedException {
 
@@ -48,65 +48,20 @@ public class NodeApp {
             String ip = args[1];
             String port = args[2];
             // The Akka path to the bootstrapping peer
-            remotePath = "akka://DHTsystem@" + ip + ":" + port + "/user/node1";
+            remotePath = "akka://DHTsystem@" + ip + ":" + port + "/user/node";
             System.out.println("Starting node " + myId + "; bootstrapping node: " + ip + ":" + port);
         } else {
             System.out.println("Starting disconnected node " + myId);
         }
-
-        Props nodeProp = Props.create(Node.class);
-
+        
         // Create the actor system
         final ActorSystem system = ActorSystem.create("DHTsystem", config);
 
         // Create a single node actor
         final ActorRef receiver = system.actorOf(
-                nodeProp, // actor class 
-                args[0] // actor name
+                Props.create(Node.class), // actor class 
+                "node" // actor name
         );
-        /*
-        config = ConfigFactory.load(args[0]+"-client");
-
-        final ActorSystem clientSystem = ActorSystem.create("clientSystem", config);
-        // Create a single node actor
-
-        final ActorRef coordinator = clientSystem.actorOf(
-                nodeProp, // actor class 
-                "coordinator"//+args[0].substring(args[0].length()-2, args[0].length()-1) // actor name
-        );
-        
-       /* if (args[0].equals("node3")) {
-            //  recover = true;
-            //System.out.println("Sending Leave Message");
-            //system.actorSelection("akka.tcp://mysystem@127.0.0.1:10004/user/node4").tell(new Leave(), receiver);
-
-            sleep(1000);
-            system.actorSelection(remotePath).tell(new Update(1, "truffles"), receiver);
-            //system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(1), receiver);
-
-            sleep(1000);
-            system.actorSelection(remotePath).tell(new GetKey(1), receiver);
-            // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new Update(2, "truffles"), receiver);
-
-            sleep(1000);
-            system.actorSelection(remotePath).tell(new Update(19, "jenny"), receiver);
-
-            sleep(1000);
-            system.actorSelection(remotePath).tell(new GetKey(19), receiver);
-            // system.actorSelection("akka.tcp://mysystem@127.0.0.1:10002/user/node2").tell(new GetKey(2), receiver);
-            // sleep(10000);
-            //  receiver.tell(Kill.getInstance(), receiver);
-        } else if (args[0].equals("node5")) {
-            sleep(1000);
-            System.out.println("-------------> Trying to send leave message");
-            system.actorSelection("akka.tcp://mysystem@127.0.0.1:10003/user/node3").tell(new Leave(), receiver);
-        } else {
-
-            //  system.actorSelection(remotePath).tell(new Update(50, "fgdf"), receiver);
-            sleep(1000);
-          //  system.actorSelection(remotePath).tell(new GetKey(50), receiver);
-            // recover = true;
-        }*/
     }
 
     public static class Node extends UntypedActor {
@@ -150,11 +105,6 @@ public class NodeApp {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(myId), getSelf());
             }
             nodes.put(myId, getSelf());
-            /* localItems.put(1, new LocalItem(1,"test"+1 ,1));   
-            localItems.put(2, new LocalItem(2,"test"+2 ,1)); 
-            localItems.put(3, new LocalItem(3,"test"+3 ,1));
-            localItems.put(100, new LocalItem(100,"test"+100 ,1)); 
-            localItems.put(50, new LocalItem(50,"test"+50 ,1));*/
         }
 
         @Override
@@ -236,6 +186,10 @@ public class NodeApp {
                     getSender().tell(new ItemList(repartitionItems, myId), getSelf());
                 }
             } else if (message instanceof Leave) {
+                if (getSender().path().name().equals("client")) {
+                    client = getSender();
+                }
+                
                 System.out.println("I have been asked to leave.");
                 nodes.remove(myId);
 
@@ -253,7 +207,11 @@ public class NodeApp {
                     System.out.println("Sending terminated");
                     nodes.get(node).tell(new Terminated(), getSelf());
                 }
-
+                
+                if(client != null){
+                    client.tell(new Terminated(), getSelf());
+                }
+                
                 System.out.println("Attempting stop!");
                 getContext().stop(getSelf());
             } //Receiving items I am responsible for
@@ -555,7 +513,7 @@ public class NodeApp {
                     nodes.values().remove(getSender());
 
                     //Printout
-                    System.out.println("After node3 leaves ");
+                    System.out.println("After "+getSender().path().toString() + " leaves");
                     System.out.println("[node" + myId + "] :" + localItems.keySet());
                 }
             } //Do not handle messages you don't know
