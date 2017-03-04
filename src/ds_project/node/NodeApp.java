@@ -22,7 +22,8 @@ import java.util.TreeMap;
 public class NodeApp {
 
     static private String remotePath = null; // Akka path of the bootstrapping peer
-    static private int myId; // ID of the local node    
+    static private int myId; // ID of the local node
+    static private String fileName = null;
     static private boolean recover = false;
 
     //Replication Parameters
@@ -43,6 +44,7 @@ public class NodeApp {
         // Load the "application.conf"
         Config config = ConfigFactory.load(args[0]);
         myId = config.getInt("nodeapp.id");
+        fileName = "node"+myId+".txt";
         if (args.length == 3) {
             // Starting with a bootstrapping node
             String ip = args[1];
@@ -95,9 +97,9 @@ public class NodeApp {
             //retrieve persistedStore if exists here
             if (recover) {
                 System.out.println("Attempting recovery");
-                File file = new File(getSelf().path().name());
+                File file = new File(fileName);
                 if (file.exists()) {
-                    localItems = PersistanceSupport.retrieveStore(getSelf().path().name());
+                    localItems = PersistanceSupport.retrieveStore(fileName);
                     System.out.println("Retrieved items from store " + localItems.size());
                 }
             }
@@ -244,7 +246,7 @@ public class NodeApp {
                         }
                     }
 
-                    PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                    PersistanceSupport.persistStore(localItems, fileName);
 
                     System.out.println("Received " + receivedItems.keySet());
 
@@ -274,7 +276,7 @@ public class NodeApp {
                             }
                         }
                     }
-                    PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                    PersistanceSupport.persistStore(localItems, fileName);
 
                     //Printout
                     System.out.println("After " + id + " has joined ");
@@ -383,7 +385,7 @@ public class NodeApp {
                             client.tell("Success", getSelf());
 
                             localItems.put(itemKey, latestItem);
-                            PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                            PersistanceSupport.persistStore(localItems, fileName);
                             //and cleanup variables state
                             this.cleanup();
                         } else {
@@ -416,7 +418,7 @@ public class NodeApp {
                     LocalItem newItem = new LocalItem(itemKey, itemValue, itemVersion);
                     //save or replace the Item
                     localItems.put(itemKey, newItem);
-                    PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                    PersistanceSupport.persistStore(localItems, fileName);
                 }
             } //When receiving a DataItem as response
             else if (message instanceof DataItem) {
@@ -473,7 +475,7 @@ public class NodeApp {
                                         if (node.equals(myId)) {
                                             //perform local update
                                             localItems.put(latestItem.getKey(), latestItem);
-                                            PersistanceSupport.persistStore(localItems, getSelf().path().name());
+                                            PersistanceSupport.persistStore(localItems, fileName);
                                         } //If different node
                                         else {
                                             //send Update request to other interestedNodes with latest Item
