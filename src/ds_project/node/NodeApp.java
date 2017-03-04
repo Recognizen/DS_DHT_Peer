@@ -1,5 +1,7 @@
 package ds_project.node;
 
+import ds_project.resources.PersistanceSupport;
+import ds_project.resources.LocalItem;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
@@ -9,7 +11,7 @@ import akka.actor.ActorSystem;
 import akka.actor.Props;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
-import ds_project.node.Messages.*;
+import ds_project.resources.Messages.*;
 import java.io.File;
 import java.io.IOException;
 import static java.lang.Thread.sleep;

@@ -3,7 +3,7 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package ds_project.node;
+package ds_project.resources;
 
 import akka.actor.ActorRef;
 import java.io.Serializable;
@@ -56,7 +56,7 @@ public class Messages {
 
     // ****** Messages needed to establish DHT network *****
     public static class RequestNodelist implements Serializable {
-        final int id;
+        public final int id;
 
         public RequestNodelist(int id) {
             this.id = id;
@@ -66,7 +66,7 @@ public class Messages {
 
     public static class Nodelist implements Serializable {
 
-        Map<Integer, ActorRef> nodes;
+        public Map<Integer, ActorRef> nodes;
 
         public Nodelist(Map<Integer, ActorRef> nodes) {
             this.nodes = Collections.unmodifiableMap(new HashMap<>(nodes));
@@ -74,7 +74,7 @@ public class Messages {
     }
 
     public static class Join implements Serializable {
-        final int id;
+        public final int id;
 
         public Join(int id) {
             this.id = id;
@@ -88,7 +88,7 @@ public class Messages {
     }
     
     public static class RequestItemlist implements Serializable {
-        final int id;
+        public final int id;
 
         public RequestItemlist(int id) {
             this.id = id;
@@ -97,9 +97,9 @@ public class Messages {
     
     public static class ItemList implements Serializable {
 
-        final Map<Integer, ImmutableItem> items;
-        final boolean leave;
-        final int senderId;
+        public final Map<Integer, ImmutableItem> items;
+        public final boolean leave;
+        public final int senderId;
 
         public ItemList(Map<Integer, ImmutableItem> items, int senderId) {
             this.items = Collections.unmodifiableMap(new HashMap<>(items));
@@ -116,9 +116,9 @@ public class Messages {
 
     public static final class ImmutableItem implements Serializable {
 
-        private final int key;
-        private final String value;
-        private final int version;
+        public final int key;
+        public final String value;
+        public final int version;
 
         public ImmutableItem(int key, String value, int version) {
             this.key = key;
@@ -140,8 +140,8 @@ public class Messages {
     }
     
     public static class UpdateRef implements Serializable {
-        final int id;
-        final ActorRef actor;
+        public final int id;
+        public final ActorRef actor;
 
         public UpdateRef(int id, ActorRef actor) {
             this.id = id;

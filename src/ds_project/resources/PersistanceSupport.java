@@ -3,7 +3,7 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package ds_project.node;
+package ds_project.resources;
 
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
