@@ -29,9 +29,9 @@ public class NodeApp {
     static private boolean recover = false;
 
     //Replication Parameters
-    static final private int N = 1;
-    static final private int R = 1;
-    static final private int W = 1;
+    static final private int N = 2;
+    static final private int R = 2;
+    static final private int W = 2;
 
     //Timeout Interval in ms
     static final private int T = 1000;
@@ -42,7 +42,12 @@ public class NodeApp {
             System.out.println("Wrong number of arguments: [conf] (+ operation + [remote_ip remote_port] )");
             return;
         }
-
+        
+        if(N >= R + W){
+            System.out.println("Replication parameters are incorrect! N >= R + W");
+            System.out.println("N:"+N +" >= R:"+R + "+ W:"+W);
+            return;
+        }
         // Load the "application.conf"
         Config config = ConfigFactory.load(args[0]);
         myId = config.getInt("nodeapp.id");
@@ -355,76 +360,80 @@ public class NodeApp {
                 }
             } //When receiving an Update request message
             else if (message instanceof Update) {
-                //extract the keyId from the message
-                final int itemKey = ((Update) message).keyId;
-                final String itemValue = ((Update) message).value;
-                final int itemVersion = ((Update) message).version;
+                if (nodes.size() < N) {
+                    getSender().tell("Not enough nodes present to perform Write operation", getSelf());
+                } else {
+                    //extract the keyId from the message
+                    final int itemKey = ((Update) message).keyId;
+                    final String itemValue = ((Update) message).value;
+                    final int itemVersion = ((Update) message).version;
 
-                //Check to see if I am coordinator (request coming from client)
-                if (getSender().path().name().equals("client")) {
+                    //Check to see if I am coordinator (request coming from client)
+                    if (getSender().path().name().equals("client")) {
 
-                    if (bufferedItems == null) {
-                        System.out.println("[Update] I AM COORDINATOR NODE " + getSelf().path().name());
+                        if (bufferedItems == null) {
+                            System.out.println("[Update] I AM COORDINATOR NODE " + getSelf().path().name());
 
-                        //keep track of client to later respond
-                        client = getSender();
+                            //keep track of client to later respond
+                            client = getSender();
 
-                        //initialise bufferedItems, anticipating incoming Items from peers
-                        bufferedItems = new ArrayList<>();
+                            //initialise bufferedItems, anticipating incoming Items from peers
+                            bufferedItems = new ArrayList<>();
 
-                        //I am trying to establish an Update Quorum
-                        writeQuorum = true;
-                        //as far as I know the dataItem I received is the latest
-                        latestItem = new LocalItem(itemKey, itemValue, itemVersion);
+                            //I am trying to establish an Update Quorum
+                            writeQuorum = true;
+                            //as far as I know the dataItem I received is the latest
+                            latestItem = new LocalItem(itemKey, itemValue, itemVersion);
 
-                        LocalItem item = new LocalItem(itemKey, "", 0);
-                        //Retrieve Nodes of interest
-                        ArrayList<Integer> interestedNodes = this.nClockwiseNodes(itemKey, N);
+                            LocalItem item = new LocalItem(itemKey, "", 0);
+                            //Retrieve Nodes of interest
+                            ArrayList<Integer> interestedNodes = this.nClockwiseNodes(itemKey, N);
 
-                        //If R = W = 1 and I am part of the interested nodes then no need to pass through the network
-                        if (interestedNodes.contains(myId) && R == 1 && W == 1) {
-                            if (localItems.containsKey(itemKey)) {
-                                item = localItems.get(itemKey);
-                            }
-                            latestItem.setVersion(item.getVersion() + 1);
-                            //simply reply to client
-                            client.tell("Successful write for key " + latestItem.getKey(), getSelf());
-
-                            localItems.put(itemKey, latestItem);
-                            PersistanceSupport.persistStore(localItems, fileName);
-                            //and cleanup variables state
-                            this.cleanup();
-                        } else {
-                            for (Integer node : interestedNodes) {
-                                //If I am interested
-                                if (node.equals(myId)) {
-                                    if (localItems.containsKey(itemKey)) {
-                                        item = localItems.get(itemKey);
-                                    }
-                                    //retrieve the item locally and buffer it
-                                    bufferedItems.add(item);
-                                } //If different node
-                                else {
-                                    //send same GetKey request but with coordinator as sender
-                                    (nodes.get(node)).tell(new GetKey(itemKey), getSelf());
+                            //If R = W = 1 and I am part of the interested nodes then no need to pass through the network
+                            if (interestedNodes.contains(myId) && N == 1 && W == 1 && R == 1) {
+                                if (localItems.containsKey(itemKey)) {
+                                    item = localItems.get(itemKey);
                                 }
-                            }
+                                latestItem.setVersion(item.getVersion() + 1);
+                                //simply reply to client
+                                client.tell("Successful write for key " + latestItem.getKey(), getSelf());
 
-                            //<start timer somewhere here>
-                            setTimoutTask();
-                            timer.schedule(timerTask, T);
+                                localItems.put(itemKey, latestItem);
+                                PersistanceSupport.persistStore(localItems, fileName);
+                                //and cleanup variables state
+                                this.cleanup();
+                            } else {
+                                for (Integer node : interestedNodes) {
+                                    //If I am interested
+                                    if (node.equals(myId)) {
+                                        if (localItems.containsKey(itemKey)) {
+                                            item = localItems.get(itemKey);
+                                        }
+                                        //retrieve the item locally and buffer it
+                                        bufferedItems.add(item);
+                                    } //If different node
+                                    else {
+                                        //send same GetKey request but with coordinator as sender
+                                        (nodes.get(node)).tell(new GetKey(itemKey), getSelf());
+                                    }
+                                }
+
+                                //<start timer somewhere here>
+                                setTimoutTask();
+                                timer.schedule(timerTask, T);
+                            }
+                        } else {
+                            System.out.println("Quorum already being attempted, request ignored");
                         }
-                    } else {
-                        System.out.println("Quorum already being attempted, request ignored");
+                    } //I am peer so I should just write
+                    else {
+                        System.out.println("[Update] I AM PEER NODE " + getSelf().path().name());
+                        //simply write the Item I received
+                        LocalItem newItem = new LocalItem(itemKey, itemValue, itemVersion);
+                        //save or replace the Item
+                        localItems.put(itemKey, newItem);
+                        PersistanceSupport.persistStore(localItems, fileName);
                     }
-                } //I am peer so I should just write
-                else {
-                    System.out.println("[Update] I AM PEER NODE " + getSelf().path().name());
-                    //simply write the Item I received
-                    LocalItem newItem = new LocalItem(itemKey, itemValue, itemVersion);
-                    //save or replace the Item
-                    localItems.put(itemKey, newItem);
-                    PersistanceSupport.persistStore(localItems, fileName);
                 }
             } //When receiving a DataItem as response
             else if (message instanceof DataItem) {
@@ -593,7 +602,7 @@ public class NodeApp {
                 public void run() {
                     TIMEOUT = true;
                     System.out.println("TIMEOUT here");
-                    client.tell("TIMEDOUT before quorum is reached!", getSelf());
+                    client.tell("TIMEDOUT before quorum is reached!", nodes.get(myId));
                     cleanup();
                 }
             };
