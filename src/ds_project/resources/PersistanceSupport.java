@@ -23,6 +23,8 @@ public final class PersistanceSupport {
     public static void persistStore(Map<Integer, LocalItem> items, String fileName) throws IOException {
         FileWriter fw = new FileWriter(fileName);
 
+        System.out.println("[Storage] Saving "+ items.keySet() + " to "+ fileName);
+        
         Iterator it = items.keySet().iterator();
 
         while (it.hasNext()) {
@@ -50,6 +52,7 @@ public final class PersistanceSupport {
 
         reader.close();
         
+        System.out.println("[Storage] Retrieved "+ items.keySet() + " from "+ fileName);
         return items;
     }
 }
