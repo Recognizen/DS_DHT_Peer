@@ -99,7 +99,7 @@ public class NodeApp {
         //timer used to schedule and fire tasks
         private final Timer timer = new java.util.Timer();
         //task containing the code to run in case of timeout
-        private TimerTask timerTask;
+        private TimerTask timerTask = null;
         //keep track if timeout has fired
         private boolean TIMEOUT = false;
 
@@ -140,11 +140,13 @@ public class NodeApp {
 
                         nodes.put(id, getSender());
                     }
-
+                    
+                    System.out.println("[NodesList] Sending list of nodes to node"+id);
                     getSender().tell(new Nodelist(nodes), getSelf());
                 }
             } else if (message instanceof Nodelist) {
                 if (!getSender().path().name().equals("client")) {
+                    System.out.println("[NodesList] Receiving list of nodes");
                     nodes.putAll(((Nodelist) message).nodes);
 
                     //I am joining -> request node list
