@@ -1,7 +1,5 @@
 package ds_project.node;
 
-import ds_project.resources.PersistanceSupport;
-import ds_project.resources.LocalItem;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
@@ -11,15 +9,17 @@ import akka.actor.ActorSystem;
 import akka.actor.Props;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
-import ds_project.resources.Messages.*;
 import java.io.File;
 import java.io.IOException;
-import static java.lang.Thread.sleep;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.TreeMap;
+import ds_project.resources.LocalItem;
+import ds_project.resources.Messages.*;
+import ds_project.resources.PersistanceSupport;
+import ds_project.ReplicationParameters;
 
 public class NodeApp {
 
@@ -29,12 +29,12 @@ public class NodeApp {
     static private boolean recover = false;
 
     //Replication Parameters
-    static final private int N = 2;
-    static final private int R = 2;
-    static final private int W = 2;
+    static final private int N = ReplicationParameters.N;
+    static final private int R = ReplicationParameters.R;
+    static final private int W = ReplicationParameters.W;
 
     //Timeout Interval in ms
-    static final private int T = 1000;
+    static final private int T = ReplicationParameters.T;
 
     public static void main(String[] args) throws InterruptedException {
 
@@ -140,8 +140,8 @@ public class NodeApp {
 
                         nodes.put(id, getSender());
                     }
-                    
-                    System.out.println("[NodesList] Sending list of nodes to node"+id);
+
+                    System.out.println("[NodesList] Sending list of nodes to node" + id);
                     getSender().tell(new Nodelist(nodes), getSelf());
                 }
             } else if (message instanceof Nodelist) {
@@ -153,7 +153,7 @@ public class NodeApp {
                     if (!recover) {
                         //For each clockwise neighbour
                         for (Integer node : this.nClockwiseNodes(myId + 1, 1)) {
-                            System.out.println("\n -- [Repartition] Requesting keys from node" + node +" -- \n");
+                            System.out.println("\n -- [Repartition] Requesting keys from node" + node + " -- \n");
                             (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
                         }
                     } //I am recovering - Check if keys still my responsibility
@@ -299,7 +299,7 @@ public class NodeApp {
                             }
                         }
                     }
-                    
+
                     PersistanceSupport.persistStore(localItems, fileName);
 
                     //Printout
@@ -326,7 +326,7 @@ public class NodeApp {
                         //If R = 1 and I am part of the interested nodes then no need to pass through the network
                         if (interestedNodes.contains(myId) && R == 1) {
                             System.out.println("[Read] R = 1 and I am responsible");
-                            System.out.println("[Read] Sending Item to client : " + localItems.get(itemKey).toString());
+                            System.out.println("[Read] Sending Item to client : ");// + localItems.get(itemKey).toString());
                             //simply reply to client
                             client.tell(new DataItem(this.getImmutableItem(itemKey)), getSelf());
                             //and cleanup variables state
@@ -360,12 +360,6 @@ public class NodeApp {
                     }
                 } //I am simply a peer, I just need to return my local copy
                 else {
-                    /*System.out.println("Sleeping before replying");
-                    try {
-                        sleep(100);
-                    } catch (InterruptedException ex) {
-                        Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
-                    }*/
                     System.out.println("\n[Read] I am a peer: [node" + myId + "]");
                     //respond to the sender with the local dataItem having that key or a "not present" dataItem
                     DataItem dataItem = new DataItem(new ImmutableItem(itemKey, "", 0));
@@ -534,13 +528,17 @@ public class NodeApp {
                                 } //readQuorum = !writeQuorum
                                 else {
                                     clientItem = latestItem;
-                                    
+
                                     System.out.println("[Read] Quorum achieved! Sending Item to client: " + client.path().toString());
-                                    client.tell(new DataItem(new ImmutableItem(
-                                            clientItem.getKey(),
-                                            clientItem.getValue(),
-                                            clientItem.getVersion())), getSelf());
-                                    System.out.println("[Read] Item sent: " + clientItem.toString());
+                                    ImmutableItem responseItem = null;
+                                    if (clientItem != null && clientItem.getVersion() > 0) {
+                                        responseItem = new ImmutableItem(
+                                                clientItem.getKey(),
+                                                clientItem.getValue(),
+                                                clientItem.getVersion());
+                                    }
+                                    client.tell(new DataItem(responseItem), getSelf());
+                                    System.out.println("[Read] Response sent " + clientItem.toString());
                                 }
                             }
                             //request has been handled - cleanup
@@ -559,7 +557,7 @@ public class NodeApp {
                 }
             } else if (message instanceof Terminated) {
                 if (!getSender().path().name().equals("client")) {
-                    System.out.println("\n --[Leave] Received terminated message from " + getSender().path() +"--\n");
+                    System.out.println("\n --[Leave] Received terminated message from " + getSender().path() + "--\n");
                     nodes.values().remove(getSender());
 
                     //Printout
@@ -585,7 +583,6 @@ public class NodeApp {
             Set<Integer> keys = nodes.keySet();
 
             //System.out.println("[ClockwiseNodes] Printing key set " + keys.toString());
-
             Integer key;
             //find the N - k clockwise nodes (where k is the number of nodes with id < itemKey)
             Iterator it = keys.iterator();
