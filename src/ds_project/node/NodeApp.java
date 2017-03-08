@@ -25,15 +25,17 @@ public class NodeApp {
 
     static private String remotePath = null; // Akka path of the bootstrapping peer
     static private int myId; // ID of the local node
+
+    //variables used for recover
     static private String fileName = null;
     static private boolean recover = false;
 
-    //Replication Parameters
+    //Parameter - defined in ReplicationParameters before compiling
     static final private int N = ReplicationParameters.N;
     static final private int R = ReplicationParameters.R;
     static final private int W = ReplicationParameters.W;
 
-    //Timeout Interval in ms
+    //Timeout Parameter expressed in ms
     static final private int T = ReplicationParameters.T;
 
     public static void main(String[] args) throws InterruptedException {
@@ -48,8 +50,10 @@ public class NodeApp {
             System.out.println("N:" + N + " >= R:" + R + "+ W:" + W);
             return;
         }
-        // Load the "application.conf"
+
+        // Load the ".conf" file 
         Config config = ConfigFactory.load(args[0]);
+
         myId = config.getInt("nodeapp.id");
         fileName = "node" + myId + ".txt";
 
@@ -71,8 +75,7 @@ public class NodeApp {
         final ActorSystem system = ActorSystem.create("DHTsystem", config);
 
         // Create a single node actor
-        final ActorRef receiver = system.actorOf(
-                Props.create(Node.class), // actor class 
+        system.actorOf(Props.create(Node.class), // actor class 
                 "node" // actor name
         );
     }
@@ -84,28 +87,27 @@ public class NodeApp {
         //In-Memory copy of the stored Items
         private Map<Integer, LocalItem> localItems = new HashMap<>();
 
-        //Variables used when peer is coordinator
-        //to buffer messages until quorum is reached
+        //Buffer messages until Quorum is reached (used to determine if Quorum in progress or not)
         private ArrayList<LocalItem> bufferedItems = null;
+
         //keep track of the client that initiated the request
         private ActorRef client = null;
 
-        //remember if writeQuorum; readQuorum otherwise
+        //remember if writeQuorum (readQuorum otherwise)
         private boolean writeQuorum = false;
-        //keep track of the item the user sent
+        //keep track of the item the user sent (in case of write)
         private LocalItem clientItem = null;
 
-        //Timeout variables
-        //timer used to schedule and fire tasks
+        //timer used to schedule and fire timeout tasks
         private final Timer timer = new java.util.Timer();
-        //task containing the code to run in case of timeout
+        //timeout task handle
         private TimerTask timerTask = null;
-        //keep track if timeout has fired
+        //keep track if TIMEOUT has fired
         private boolean TIMEOUT = false;
 
         @Override
         public void preStart() throws IOException {
-            //retrieve persistedStore if exists here
+            //if peer is recovering call retrieveStore
             if (recover) {
                 System.out.println("\n -- [Recover] Attempting recovery -- \n");
                 File file = new File(fileName);
@@ -113,6 +115,8 @@ public class NodeApp {
                     localItems = PersistanceSupport.retrieveStore(fileName);
                 }
             }
+
+            //Contact bootstrapping node
             if (remotePath != null) {
                 getContext().actorSelection(remotePath).tell(new RequestNodelist(myId), getSelf());
             }
@@ -121,7 +125,6 @@ public class NodeApp {
 
         @Override
         public void onReceive(Object message) throws IOException {
-
             if (message instanceof RequestNodelist) {
                 if (!getSender().path().name().equals("client")) {
                     final int id = ((RequestNodelist) message).id;
@@ -144,20 +147,22 @@ public class NodeApp {
                     System.out.println("[NodesList] Sending list of nodes to node" + id);
                     getSender().tell(new Nodelist(nodes), getSelf());
                 }
-            } else if (message instanceof Nodelist) {
+            } 
+            else if (message instanceof Nodelist) {
                 if (!getSender().path().name().equals("client")) {
                     System.out.println("[NodesList] Receiving list of nodes");
                     nodes.putAll(((Nodelist) message).nodes);
 
-                    //I am joining -> request node list
+                    //I am joining -> request ItemList I am responsible for
                     if (!recover) {
                         //For each clockwise neighbour
                         for (Integer node : this.nClockwiseNodes(myId + 1, 1)) {
                             System.out.println("\n -- [Repartition] Requesting keys from node" + node + " -- \n");
                             (nodes.get(node)).tell(new RequestItemlist(myId), getSelf());
                         }
-                    } //I am recovering - Check if keys still my responsibility
-                    else {
+                    } 
+                    //I am recovering - Check if keys still my responsibility
+                    else if(recover){
                         Iterator it = localItems.keySet().iterator();
                         while (it.hasNext()) {
                             Integer key = (Integer) it.next();
@@ -167,12 +172,12 @@ public class NodeApp {
                                 it.remove();
                             }
                         }
-
                         System.out.println("[Recover] After I recovered ");
                         System.out.println("[Recover] node" + myId + " : " + localItems.keySet());
                     }
                 }
-            } //Receive a new reference for a certain node
+            }
+            //Receive a new reference for a certain node
             else if (message instanceof UpdateRef) {
                 if (!getSender().path().name().equals("client")) {
                     final int id = ((UpdateRef) message).id;
@@ -183,7 +188,8 @@ public class NodeApp {
                     System.out.println("[Recover] After node" + id + " has recovered ");
                     System.out.println("[Recover] node" + myId + " : " + localItems.keySet());
                 }
-            } //Return the nodes the requester is responsible for
+            } 
+            //Return the nodes the requester is responsible for
             else if (message instanceof RequestItemlist) {
                 if (!getSender().path().name().equals("client")) {
                     final int id = ((RequestItemlist) message).id;
@@ -192,9 +198,10 @@ public class NodeApp {
                     System.out.println("\n -- [Repartition] node" + id + " requesting items -- \n");
 
                     for (Integer key : localItems.keySet()) {
-                        if ((nodes.size() < N) || /*(myId > id && key < myId) ||*/ key == id) {//optimization logic problem
+                        if ((nodes.size() < N) || key == id) {
                             repartitionItems.put(key, this.getImmutableItem(key));
                         } else {
+                            //Calculate responsible nodes considering the joining node having id = id
                             nodes.put(id, null);
                             ArrayList<Integer> responsibleNodes = this.nClockwiseNodes(key, N);
                             nodes.remove(id);
@@ -207,7 +214,8 @@ public class NodeApp {
                     System.out.println("[Repartition] Sending " + repartitionItems);
                     getSender().tell(new ItemList(repartitionItems, myId), getSelf());
                 }
-            } else if (message instanceof Leave) {
+            } 
+            else if (message instanceof Leave) {
                 if (getSender().path().name().equals("client")) {
                     client = getSender();
                 }
@@ -220,12 +228,14 @@ public class NodeApp {
                     repartitionItems.put(key, this.getImmutableItem(key));
                 }
 
+                //Send my local store to N neighbours
                 final ArrayList<Integer> neighbours = this.nClockwiseNodes(myId, N);
                 for (Integer node : neighbours) {
                     System.out.println("[Leave] Sending " + repartitionItems + " to node" + node);
                     (nodes.get(node)).tell(new ItemList(repartitionItems, myId, true), getSelf());
                 }
 
+                //Announce termination
                 for (Integer node : nodes.keySet()) {
                     System.out.println("[Leave] Sending terminated to node" + node);
                     nodes.get(node).tell(new Terminated(), getSelf());
@@ -238,7 +248,8 @@ public class NodeApp {
 
                 System.out.println("[Leave] Attempting stop!");
                 getContext().stop(getSelf());
-            } //Receiving items I am responsible for
+            } 
+            //Receiving items I am responsible for
             else if (message instanceof ItemList) {
                 if (!getSender().path().name().equals("client")) {
                     final boolean leave = ((ItemList) message).leave;
@@ -253,6 +264,7 @@ public class NodeApp {
 
                         //double check responsibility for ambiguous keys (only needed on leave)
                         if (senderId > key && leave) {
+                            //Calculate N neighbours without considering the leaving node
                             ActorRef sender = nodes.get(senderId);
                             nodes.remove(senderId);
                             ArrayList<Integer> responsibleNodes = this.nClockwiseNodes(key, N);
@@ -273,21 +285,22 @@ public class NodeApp {
                     PersistanceSupport.persistStore(localItems, fileName);
                     System.out.println("[Repartition] node" + myId + " : " + localItems.keySet());
 
-                    //if it is not from a Leaver then it is for when I join
+                    //if it is not from a Leaver then it is response to my request (on join)
                     if (!leave) {
-                        System.out.println("[Join] Sending join messages");
-                        //Announce my joining                
+                        System.out.println("[Join] Announcing my joining");       
                         for (ActorRef n : nodes.values()) {
                             n.tell(new Join(myId), getSelf());
                         }
                     }
                 }
-            } else if (message instanceof Join) {
+            } 
+            else if (message instanceof Join) {
                 if (!getSender().path().name().equals("client")) {
                     final int id = ((Join) message).id;
                     System.out.println(" \n -- [Join] Node " + id + " joined -- \n");
                     nodes.put(id, getSender());
 
+                    //check and remove items no longer my responsibility
                     if (myId != id && !localItems.isEmpty()) {
                         System.out.println("[Join] Removing items I am no longer responsible for");
                         Iterator it = localItems.keySet().iterator();
@@ -299,43 +312,43 @@ public class NodeApp {
                             }
                         }
                     }
-
                     PersistanceSupport.persistStore(localItems, fileName);
 
-                    //Printout
                     System.out.println("[Repartition] After " + id + " has joined ");
                     System.out.println("[Repartition] node" + myId + " : " + localItems.keySet());
                 }
-            } //When receiving a GetKey request message
+            } 
+            //When receiving a GetKey request message
             else if (message instanceof GetKey) {
-                //extract the keyId from the message
                 final int itemKey = ((GetKey) message).keyId;
 
                 //Check to see if I am coordinator (request coming from a client)
                 if (getSender().path().name().equals("client")) {
+                    //if bufferedItems == null then no Quorum in progress
                     if (bufferedItems == null) {
                         System.out.println("\n[Read] I am coordinator [node" + myId + "]");
+                        
                         //keep track of client to later respond
                         client = getSender();
                         //initialise bufferedDataItems, anticipating incoming dataItems from peers
                         bufferedItems = new ArrayList<>();
 
-                        //Retrieve Nodes of interest
                         ArrayList<Integer> interestedNodes = this.nClockwiseNodes(itemKey, N);
 
                         //If R = 1 and I am part of the interested nodes then no need to pass through the network
                         if (interestedNodes.contains(myId) && R == 1) {
                             System.out.println("[Read] R = 1 and I am responsible");
-                            System.out.println("[Read] Sending Item to client : ");// + localItems.get(itemKey).toString());
-                            //simply reply to client
+                            System.out.println("[Read] Sending Item to client");
+                            
                             client.tell(new DataItem(this.getImmutableItem(itemKey)), getSelf());
-                            //and cleanup variables state
+                            
+                            //cleanup variables state for next client request
                             this.cleanup();
-                        } //for when contacting other peers is needed
+                        } 
+                        //for when contacting other peers is needed
                         else {
                             System.out.println("\n ----- [Read] Initiating Quorum! ----- \n");
                             for (Integer node : interestedNodes) {
-                                //If I am interested
                                 if (node.equals(myId)) {
                                     //retrieve the item locally and buffer it
                                     if (localItems.containsKey(itemKey)) {
@@ -343,7 +356,8 @@ public class NodeApp {
                                     } else {
                                         bufferedItems.add(new LocalItem(itemKey, "", 0));
                                     }
-                                } //If different node
+                                } 
+                                //If different node
                                 else {
                                     //send same GetKey request but with coordinator as sender
                                     (nodes.get(node)).tell(message, getSelf());
@@ -358,10 +372,11 @@ public class NodeApp {
                     } else {
                         System.out.println("[Read] Quorum already being attempted, request ignored");
                     }
-                } //I am simply a peer, I just need to return my local copy
+                } 
+                //I am simply a peer, I just need to return my local copy
                 else {
                     System.out.println("\n[Read] I am a peer: [node" + myId + "]");
-                    //respond to the sender with the local dataItem having that key or a "not present" dataItem
+
                     DataItem dataItem = new DataItem(new ImmutableItem(itemKey, "", 0));
                     if (localItems.containsKey(itemKey)) {
                         dataItem = new DataItem(this.getImmutableItem(itemKey));
@@ -369,13 +384,13 @@ public class NodeApp {
                     System.out.println("[Read] Replying with " + localItems.get(itemKey));
                     getSender().tell(dataItem, getSelf());
                 }
-            } //When receiving an Update request message
+            } 
+            //When receiving an Update request message
             else if (message instanceof Update) {
                 if (nodes.size() < N) {
                     System.out.println("[Write] Ignoring request - Not enough peers");
                     getSender().tell("Not enough nodes present to perform Write operation", getSelf());
                 } else {
-                    //extract the keyId from the message
                     final int itemKey = ((Update) message).keyId;
                     final String itemValue = ((Update) message).value;
                     final int itemVersion = ((Update) message).version;
@@ -393,11 +408,13 @@ public class NodeApp {
 
                             //I am trying to establish an Update Quorum
                             writeQuorum = true;
-                            //as far as I know the dataItem I received is the latest
+                            
+                            //initialise a LocalItem with client information
                             clientItem = new LocalItem(itemKey, itemValue, itemVersion);
 
+                            //generic "empty" LocalItem
                             LocalItem item = new LocalItem(itemKey, "", 0);
-                            //Retrieve Nodes of interest
+                            
                             ArrayList<Integer> interestedNodes = this.nClockwiseNodes(itemKey, N);
 
                             //If R = W = 1 and I am part of the interested nodes then no need to pass through the network
@@ -411,28 +428,28 @@ public class NodeApp {
                                 clientItem.setVersion(item.getVersion() + 1);
 
                                 System.out.println("[Write] Reply with successful write to client");
-                                //simply reply to client
                                 client.tell("Successful write for key " + clientItem.getKey(), getSelf());
 
                                 System.out.println("[Write] Saving item locally: " + clientItem.toString());
-
                                 localItems.put(itemKey, clientItem);
                                 PersistanceSupport.persistStore(localItems, fileName);
-                                //and cleanup variables state
+                                
+                                //cleanup variables state for next client request
                                 this.cleanup();
-                            } else {
+                            } 
+                            //need to contact other peers
+                            else {
                                 System.out.println("\n ----- [Write] Initiating Quorum! ----- \n");
                                 for (Integer node : interestedNodes) {
-                                    //If I am interested
                                     if (node.equals(myId)) {
                                         if (localItems.containsKey(itemKey)) {
                                             item = localItems.get(itemKey);
                                         }
                                         //retrieve the item locally and buffer it
                                         bufferedItems.add(item);
-                                    } //If different node
+                                    }
                                     else {
-                                        //send same GetKey request but with coordinator as sender
+                                        //send GetKey request of same key with coordinator as sender
                                         (nodes.get(node)).tell(new GetKey(itemKey), getSelf());
                                     }
                                 }
@@ -444,43 +461,41 @@ public class NodeApp {
                         } else {
                             System.out.println("[Write] Quorum already being attempted, request ignored");
                         }
-                    } //I am peer so I should just write
+                    } 
+                    //I am peer so I should just write
                     else {
                         System.out.println("\n[Write] I am a peer: [node" + myId + "]");
-                        //simply write the Item I received
+                        
                         LocalItem newItem = new LocalItem(itemKey, itemValue, itemVersion);
-                        //save or replace the Item
-
+                        
                         System.out.println("[Write] Saving item locally: " + newItem.toString());
-
                         localItems.put(itemKey, newItem);
                         PersistanceSupport.persistStore(localItems, fileName);
                     }
                 }
-            } //When receiving a DataItem as response
+            } 
+            //When receiving a DataItem as response
             else if (message instanceof DataItem) {
                 if (!getSender().path().name().equals("client")) {
                     //if not null then I previously initiated a quorum request 
                     if (bufferedItems != null && !TIMEOUT) {
                         /**
-                         * if not enough replies received two cases: ReadQuorum
-                         * - if not enough replies yet and not a writeQuorum
-                         * expected WriteQuorum - if not enough replies yet and
-                         * writeQuorum expected
+                         * if not enough replies received two cases: 
+                         * ReadQuorum - if not enough replies yet and not a writeQuorum expected 
+                         * WriteQuorum - if not enough replies yet and writeQuorum expected
                          */
                         if ((bufferedItems.size() < R && !writeQuorum)
                                 || (bufferedItems.size() < Integer.max(R, W) && writeQuorum)) {
-                            //buffer the freshly received Item
                             ImmutableItem item = ((DataItem) message).item;
+                            
                             System.out.println("[Quorum] Buffering data item " + item.toString());
                             bufferedItems.add(new LocalItem(item.getKey(), item.getValue(), item.getVersion()));
                         }
 
-                        //Read/Write Quorum reached: I have received enough replies 
+                        //I have received enough replies: Read/Write Quorum reached
                         if ((bufferedItems.size() == R && !writeQuorum)
                                 || (bufferedItems.size() == Integer.max(R, W) && writeQuorum)) {
 
-                            //Stop timeout timer: Quorum reached
                             System.out.println("[Quoru] Quorum Reached - Stopping timer");
                             timerTask.cancel();
 
@@ -496,46 +511,39 @@ public class NodeApp {
                                 }
                             }
 
-                            //If client ActorRef exists
-                            if (client != null) {
-                                //if I am trying to establish a writeQuorum
+                            if (client != null && !TIMEOUT) {
                                 if (writeQuorum) {
                                     //Increment item version before writing
                                     clientItem.setVersion(latestItem.getVersion() + 1);
 
                                     System.out.println("[Write] Quorum achieved! Responding successful write to client");
-                                    //Answer client - successful write
                                     client.tell("Successful write for key " + clientItem.getKey(), getSelf());
 
                                     System.out.println("[Write] Propagating update of item: " + clientItem.toString());
-
-                                    //for every interestedNode
                                     for (Integer node : this.nClockwiseNodes(clientItem.getKey(), N)) {
-                                        //If I am interested
                                         if (node.equals(myId)) {
                                             System.out.println("[Write] Saving item locally: " + clientItem.toString());
                                             //perform local update
                                             localItems.put(clientItem.getKey(), clientItem);
                                             PersistanceSupport.persistStore(localItems, fileName);
-                                        } //If different node
+                                        }
                                         else {
-                                            //send Update request to other interestedNodes with latest Item
+                                            //send Update request to other interestedNodes with clientItem
                                             (nodes.get(node)).tell(new Update(clientItem.getKey(),
                                                     clientItem.getValue(),
                                                     clientItem.getVersion()), getSelf());
                                         }
                                     }
-                                } //readQuorum = !writeQuorum
-                                else {
+                                } 
+                                else if(!writeQuorum){
                                     clientItem = latestItem;
 
-                                    System.out.println("[Read] Quorum achieved! Sending Item to client: " + client.path().toString());
+                                    System.out.println("[Read] Quorum achieved! Sending Item to client");
                                     ImmutableItem responseItem = null;
                                     if (clientItem != null && clientItem.getVersion() > 0) {
-                                        responseItem = new ImmutableItem(
-                                                clientItem.getKey(),
-                                                clientItem.getValue(),
-                                                clientItem.getVersion());
+                                        responseItem = new ImmutableItem(clientItem.getKey(),
+                                                                         clientItem.getValue(),
+                                                                         clientItem.getVersion());
                                     }
                                     client.tell(new DataItem(responseItem), getSelf());
                                     System.out.println("[Read] Response sent " + clientItem.toString());
@@ -555,7 +563,8 @@ public class NodeApp {
                         System.out.println(dropped.getKey() + " " + dropped.getValue() + " " + dropped.getVersion());
                     }
                 }
-            } else if (message instanceof Terminated) {
+            } 
+            else if (message instanceof Terminated) {
                 if (!getSender().path().name().equals("client")) {
                     System.out.println("\n --[Leave] Received terminated message from " + getSender().path() + "--\n");
                     nodes.values().remove(getSender());
@@ -564,7 +573,8 @@ public class NodeApp {
                     System.out.println("[Leave] After " + getSender().path().toString() + " leaves");
                     System.out.println("[Leave] node" + myId + " :" + localItems.keySet());
                 }
-            } //Do not handle messages you don't know
+            } 
+            //Do not handle messages you don't know
             else {
                 unhandled(message);
             }
@@ -578,11 +588,9 @@ public class NodeApp {
 
         //check on number of nodes should be done earlier
         public ArrayList<Integer> nClockwiseNodes(Integer itemKey, int n) {
-            //N replication parameter
             ArrayList<Integer> interestedNodes = new ArrayList<>();
             Set<Integer> keys = nodes.keySet();
 
-            //System.out.println("[ClockwiseNodes] Printing key set " + keys.toString());
             Integer key;
             //find the N - k clockwise nodes (where k is the number of nodes with id < itemKey)
             Iterator it = keys.iterator();
@@ -607,7 +615,7 @@ public class NodeApp {
 
         //resets values used when establishing read/write quorums
         public void cleanup() {
-            System.out.println("[Cleanup] For next quorum");
+            System.out.println("[Cleanup] For next client request");
             client = null;
             bufferedItems = null;
             writeQuorum = false;
