@@ -370,7 +370,8 @@ public class NodeApp {
                         }
 
                     } else {
-                        System.out.println("[Read] Quorum already being attempted, request ignored");
+                        System.out.println("[Read] Quorum already being attempted, request ignored");                            
+                        getSender().tell("Another request in progress.", getSelf());
                     }
                 } 
                 //I am simply a peer, I just need to return my local copy
@@ -460,6 +461,7 @@ public class NodeApp {
                             }
                         } else {
                             System.out.println("[Write] Quorum already being attempted, request ignored");
+                            getSender().tell("Another request in progress.", getSelf());
                         }
                     } 
                     //I am peer so I should just write
